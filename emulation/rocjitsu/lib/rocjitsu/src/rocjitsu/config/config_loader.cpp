@@ -586,6 +586,18 @@ util::FailureOr<std::vector<simdojo::LinkSpec>> expand_link(const fb::LinkDef *l
 
 using AsyncResources = std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>;
 using CfgMap = std::unordered_map<std::string, std::string>;
+util::FailureOr<amdgpu::ArithmeticPolicy>
+arithmetic_from_config(const CfgMap &cfg, util::DiagnosticEmitter emit_error) {
+  auto value = [&](const char *key, const char *fallback) -> std::string_view {
+    auto it = cfg.find(key);
+    return it == cfg.end() ? std::string_view(fallback) : std::string_view(it->second);
+  };
+  if (cfg.count("arithmetic_fallback") || cfg.count("arithmetic_state_reporting"))
+    return emit_error.emit()
+           << "Use arithmetic_semantics instead of separate fallback/reporting controls";
+  return parse_arithmetic_config(value("arithmetic_semantics", "compatibility"), emit_error);
+}
+
 enum class BuildMode { Full, Validate };
 
 util::FailureOr<amdgpu::ComputeUnitCore::Config>
@@ -595,6 +607,10 @@ parse_compute_unit_config(const CfgMap &cfg, rj_code_arch_t arch, rj_code_target
   cc.arch = arch;
   cc.async_resources = resources;
   cc.target = target;
+  auto arithmetic = arithmetic_from_config(cfg, emit_error);
+  if (arithmetic.failed())
+    return util::Result::failure();
+  cc.arithmetic = arithmetic.value();
   cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
   cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
   cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
@@ -747,8 +763,11 @@ const FactoryMap &factories(BuildMode build_mode) {
 // Validate explicit policies even when the launch override will replace them.
 util::Result apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides,
                                 util::DiagnosticEmitter emit_error) {
+  if (arithmetic_from_config(cfg, emit_error).failed())
+    return util::Result::failure();
   for (const auto &[key, value] : overrides) {
-    if (auto it = cfg.find(key); it != cfg.end() && it->second != "off" && it->second != "warn")
+    if (auto it = cfg.find(key); key != "arithmetic_semantics" && it != cfg.end() &&
+                                 it->second != "off" && it->second != "warn")
       return emit_error.emit() << key << " must be warn or off";
     cfg[key] = value;
   }
@@ -1187,6 +1206,13 @@ build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_thr
               std::optional<std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>>
                   async_resources_override = std::nullopt) {
   CfgMap cu_overrides;
+  if (const auto *policy = fb_config->arithmetic()) {
+    // Validate even when the topology contains no CUs, using this API's failure channel.
+    if (arithmetic_from_fb(policy, emit_error).failed())
+      return util::Result::failure();
+    cu_overrides["arithmetic_semantics"] =
+        policy->semantics() ? policy->semantics()->str() : "compatibility";
+  }
   if (const auto *setting = fb_config->wait_checking()) {
     const auto mode = parse_wait_checking(setting->string_view());
     if (!mode)
@@ -1414,6 +1440,9 @@ auto with_config_json(const std::string &json, const std::string &schema_text,
       json, schema_text, emit_error, [&](const fb::SimulationConfig *config) {
         if (config->system())
           return with_parsed_simulation_config_json(json, schema_text, emit_error, callback, false);
+        if (config->arithmetic() &&
+            validate_arithmetic_config_json(json, schema_text, emit_error).failed())
+          return decltype(callback(config))(util::Result::failure());
         return callback(config);
       });
 }
