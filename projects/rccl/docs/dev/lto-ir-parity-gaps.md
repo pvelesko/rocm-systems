@@ -153,10 +153,13 @@ These surfaced while measuring the above. None is an LTO IR defect; all
 predate this work.
 
 **`IR_gin_mpi_test.cpp` does not compile against `develop`'s header.**
-Lines 160 and 185 pass `net` by value (a `ncclGin_C` built at lines 149 and
-171) where `nccl_device_wrapper.h:318,339` declare the parameter as
-`ncclGin_C const* net`. This is the 2 pre-existing errors in the
-`test/ir-device` baseline, unchanged by this work.
+The `ncclGinBarrierSessionInit` call at line 160 and the
+`ncclBarrierSessionInit` call at line 182 pass `net` by value (a
+`ncclGin_C` built at lines 149 and 171) where
+`nccl_device_wrapper.h:318,339` declare the parameter as `ncclGin_C const*
+net`. This is the 2 pre-existing errors in the `test/ir-device` baseline
+(`19 passed, 2 errors` at the end of this work, against `7 passed, 2
+errors` before it), unchanged either way.
 
 **Two dead LDS globals in the `.ltoir`.** The artifact contains four
 `addrspace(3)` globals (the `.bc` has zero): the function-local stashes of
@@ -167,12 +170,22 @@ recipe deliberately runs no DCE, and a consumer's link removes them.
 `test_no_reachable_lds` asserts the reachability property rather than a
 count, precisely so this expected residue does not read as a regression.
 
-**The `llvm_ir` path rebuilds unconditionally.** `cmake -E
-copy_if_different` does not bump the destination mtime when the contents
-match, so once `nccl_device_wrapper.h` is touched the staging rule re-runs
-on every subsequent build. Pre-existing `develop` behaviour on the
-`EMIT_LLVM_IR` path; the LTO IR path inherits it through the shared staging
-target.
+**The `llvm_ir` path rebuilds unconditionally, by two separate
+mechanisms.** In `bindings/ir/Makefile`, `$(UNOPTIMIZED_BC)` lists the
+`.PHONY` target `check_hipify` as a *normal* prerequisite
+(`bindings/ir/Makefile:174`, and identically at `:140` on `develop`), which
+makes it perpetually out of date — a no-op `make build` still recompiles
+the `.bc`. In CMake, `cmake -E copy_if_different` does not bump the
+destination mtime when the contents match, so once
+`nccl_device_wrapper.h` is touched the staging rule re-runs on every
+subsequent build. Both are pre-existing `develop` behaviour on the
+`EMIT_LLVM_IR` path.
+
+The LTO IR rules deliberately do not reproduce the first one:
+`$(LTO_IR_RAW)` takes `check_hipify` as an **order-only** prerequisite
+(`| check_hipify`), which still runs the staging check first without
+marking the target stale. A no-op `make ltoir` regenerates nothing, and
+touching `librccl_device.bc` does not regenerate `librccl_device.ltoir`.
 
 **The artifacts are not byte-comparable across build systems.** clang
 embeds the input path in `source_filename` and the output path in
