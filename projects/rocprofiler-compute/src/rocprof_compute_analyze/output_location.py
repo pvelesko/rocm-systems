@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Optional
 
 RUN_FOLDER_PREFIX = "rocprof_compute_analyze"
+REPORT_FILE_NAME = "report.txt"
+ANALYSIS_DB_FILE_NAME = "analysis.db"
 RUN_NAME_PATTERN = re.compile(r"[A-Za-z0-9_-]+")
 
 
@@ -36,7 +38,8 @@ def resolve_run_folder(directory: Path, name: Optional[str], now: datetime) -> P
         now: Local time used for the timestamped name.
 
     Returns:
-        directory/name when a name is given; it must not already exist.
+        directory/name when a name is given and available. An occupied name
+        gets a timestamp suffix, with a numeric suffix added when necessary.
         Otherwise directory/rocprof_compute_analyze_<YYYYMMDD_HHMMSS>, with
         _1, _2, ... appended until the path is free.
     """
@@ -55,3 +58,13 @@ def resolve_run_folder(directory: Path, name: Optional[str], now: datetime) -> P
         (directory / f"{base_name}_{index}" for index in itertools.count(1)),
     )
     return next(path for path in candidates if not path.exists())
+
+
+def workload_folder_name(position: int, workload_path: Path) -> str:
+    """Return the run-folder subfolder name for the -p workload at position.
+
+    Args:
+        position: 1-based position of the workload among the -p paths.
+        workload_path: The workload directory given with -p.
+    """
+    return f"{position}-{workload_path.name}"

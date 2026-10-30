@@ -101,7 +101,7 @@ and neither writes the roofline HTML.
 | FR-1 | Every analyze run other than a listing run creates one new run folder. It holds the analysis DB, the full text report, and one folder per workload with the workload CSVs and one folder per kernel. When the data exists, the run also writes the roofline HTML, memory-chart HTML, PC-sampling files, and ML API trace export. |
 | FR-2 | `--output-format` stays for one release as a deprecated no-op: `(DEPRECATED)` in help, a warning when used, value ignored. It is removed in the following release. `-b/--block` remains functional and adds the requested analysis blocks to the CLI display alongside the standard CLI sections (FR-26). It does not narrow calculations or other output artifacts. |
 | FR-3 | New analyze option `-d/--output-directory <dir>` names the parent of the run folder. It defaults to the current directory, takes a plain path with no placeholder expansion, and is created with its missing parents. |
-| FR-4 | `-o/--output-name <name>` names the run folder and must match `[A-Za-z0-9_-]+`. If the folder already exists, the run errors before any calculation. |
+| FR-4 | `-o/--output-name <name>` names the run folder and must match `[A-Za-z0-9_-]+`. If the folder already exists, append a timestamp and then `_1`, `_2`, … as needed to find a free name. |
 | FR-5 | Without `-o`, the run folder is `rocprof_compute_analyze_<YYYYMMDD_HHMMSS>` in local time. If that folder exists, `_1`, `_2`, … is appended until the name is free. |
 | FR-6 | `--list-stats`, `--list-available-metrics`, `--list-torch-operators` and `--list-triton-operators` only print. They create no run folder and write no files. |
 | FR-7 | Analyze writes only inside its run folder. It never modifies or deletes existing files, in workload directories or anywhere else. The run folder may lie inside a workload directory. |
@@ -250,9 +250,7 @@ flowchart TD
     A[parse arguments] --> L{listing option?}
     L -->|yes| P[print listing and exit; no files]
     L -->|no| R["resolve run folder<br/>-d/--output-directory or cwd,<br/>-o name or timestamp name"]
-    R --> X{"-o given and<br/>folder exists?"}
-    X -->|yes| E1[error]
-    X -->|no| V["validate workloads and filter ids"]
+    R --> V["validate workloads and filter ids"]
     V --> G{"idle-GPU counter?"}
     G -->|yes| E3[halt, nothing written]
     G -->|no| C["calculate into in-memory DB"]
@@ -263,7 +261,7 @@ flowchart TD
 ```
 
 Every failure that depends on the input happens before the run folder is created. This covers
-an existing `-o` folder, invalid ids, the idle-GPU guard, and evaluation errors. A failure while
+invalid ids, the idle-GPU guard, and evaluation errors. A failure while
 writing leaves a partial run folder, which the error names.
 
 ### Output location
@@ -272,15 +270,15 @@ writing leaves a partial run folder, which the error names.
 |---|---|---|
 | — | — | `./rocprof_compute_analyze_<YYYYMMDD_HHMMSS>[_N]` |
 | `<dir>` | — | `<dir>/rocprof_compute_analyze_<YYYYMMDD_HHMMSS>[_N]` |
-| — | `X` | `./X`, error if it exists |
-| `<dir>` | `X` | `<dir>/X`, error if it exists |
+| — | `X` | `./X`, or `./X_<YYYYMMDD_HHMMSS>[_N]` if occupied |
+| `<dir>` | `X` | `<dir>/X`, or `<dir>/X_<YYYYMMDD_HHMMSS>[_N]` if occupied |
 | listing option | any | none; the listing is printed |
 
 - `-d/--output-directory` follows the profile-mode option name. The dispatch-ID filter is
   renamed to `--kernel-iteration-range`, and the old `--dispatch` spelling is removed.
 - `-o` names the output, as rocprofv3's `-o` does.
-- The timestamp sorts run folders chronologically. A user-chosen name is never reused, so a
-  rerun cannot overwrite earlier results.
+- The timestamp sorts run folders chronologically. An occupied user-chosen name gets a timestamp
+  and numeric suffix, so a rerun cannot overwrite earlier results.
 - Paths are taken literally; the shell expands variables.
 
 ### Analyze deletes nothing
@@ -337,7 +335,7 @@ Migration for existing scripts:
 | `--output-format db --output-name X` → `./X.db` | `-o X` → `./X/analysis.db` |
 | `--output-format csv --output-name X` → `./X/*.csv` | `./X/1-wl/*.csv` and `./X/1-wl/kernel-*/` |
 | `--output-format txt` → `./<name>.txt` | `<run-folder>/report.txt` |
-| Rerun with the same `--output-name` replaces files | error; choose a new name or omit `-o` |
+| Rerun with the same `--output-name` replaces files | creates a timestamped folder suffix |
 | `-b <block>` adds selected blocks to the CLI report | requested blocks appear alongside the standard CLI sections; `report.txt` and exported data still contain every block |
 | `<workload>/empirRoof_gpu-0_<k>.html` | `<run-folder>/<pos>-<workload>/roofline-gpu-0.html` |
 | `<workload>/pmc_kernel_top.csv`, `pmc_dispatch_info.csv` | not written |
@@ -403,7 +401,7 @@ profile `--path` → `--output-directory` precedent for the output-format migrat
 | 4 | Peak coverage | gfx950 and gfx1250 F6F4 and gfx1250 WMMA FP64 peaks equal their `roofline.csv` values; an invalid file gives NULL peaks, no roofline, and a warning | unit | FR-13 |
 | 5 | Typed variables | Same values with and without matching specs correction; a zero value stays 0; a missing value gives NULL and a warning; missing `num_xcd` gives 1 | unit | FR-14 |
 | 6 | Idle-GPU guard and invalid ids | Exit with today's messages, roof-only profiles included; unknown ids fail, removed `--dispatch` is rejected, and no run folder is created | integration + CLI | FR-16, FR-18 |
-| 7 | Output resolution matrix | Each row of the location table behaves as specified: timestamp name, `_N` on collision, existing `-o` folder errors, missing parents created with both `-d` and `--output-directory`, listing options write nothing | unit + CLI | FR-3–FR-6 |
+| 7 | Output resolution matrix | Each row of the location table behaves as specified: timestamp names, suffixes on collisions, missing parents created with both `-d` and `--output-directory`, listing options write nothing | unit + CLI | FR-3–FR-6 |
 | 8 | Read-only and untouched workload | Analysis of a read-only workload succeeds; a workload directory's existing files are unchanged after a run, including one whose run folder lies inside it | integration | FR-7, FR-8 |
 | 9 | Layout | Expected files and names for single, comparison, PC-sampling and operator runs; kernel folders in top-stats order with demangled names truncated to 64 characters; `kernels.csv` maps every folder | integration | FR-1, FR-9, FR-31, FR-32, FR-34 |
 | 10 | Schema | `schema_version` is 2.4.0; 2.3.1 queries on existing tables and views succeed; schema diagrams regenerated | unit | FR-21, FR-23, FR-24 |
@@ -417,7 +415,7 @@ profile `--path` → `--output-directory` precedent for the output-format migrat
 
 - Analyze deletes nothing and writes only into a folder it has just created.
 - `--output-name` must be a bare name, so it cannot place output outside `--output-directory`.
-- An existing `-o` folder is an error, so a run cannot overwrite earlier results.
+- An occupied `-o` folder gets a unique suffixed name, so a run cannot overwrite earlier results.
 
 ### Debuggability
 
