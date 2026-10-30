@@ -2616,6 +2616,48 @@ TEST(WrapMicrotest, SetP2pNetChunkSize_EnvPresentReturnsInvalid) {
   DeleteCommWithArch(comm);
 }
 
+// rcclP2pNvlChunkSize: 123456 stands in for NCCL_P2P_NVL_CHUNKSIZE's value so a pass-through
+// cannot coincide with the 128 kB override.
+TEST(WrapMicrotest, P2pNvlChunkSize_MnnvlAcrossHostsDefaultsTo128k) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->MNNVL = 1;
+  comm->topo->nHosts = 2;
+  SetMicroEnvAbsent("NCCL_P2P_NVL_CHUNKSIZE");
+  EXPECT_EQ(1 << 17, rcclP2pNvlChunkSize(comm, 123456));
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, P2pNvlChunkSize_MnnvlAcrossHostsWithEnvSetKeepsTheNcclValue) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->MNNVL = 1;
+  comm->topo->nHosts = 2;
+  SetMicroEnv("NCCL_P2P_NVL_CHUNKSIZE", "123456");
+  EXPECT_EQ(123456, rcclP2pNvlChunkSize(comm, 123456));
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, P2pNvlChunkSize_MnnvlSingleHostKeepsTheNcclValue) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->MNNVL = 1;
+  comm->topo->nHosts = 1;
+  SetMicroEnvAbsent("NCCL_P2P_NVL_CHUNKSIZE");
+  EXPECT_EQ(123456, rcclP2pNvlChunkSize(comm, 123456));
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
+TEST(WrapMicrotest, P2pNvlChunkSize_NotMnnvlKeepsTheNcclValue) {
+  ncclComm* comm = MakeCommWithArch("gfx1250");
+  comm->MNNVL = 0;
+  comm->topo->nHosts = 2;
+  SetMicroEnvAbsent("NCCL_P2P_NVL_CHUNKSIZE");
+  EXPECT_EQ(123456, rcclP2pNvlChunkSize(comm, 123456));
+  ClearMicroEnv();
+  DeleteCommWithArch(comm);
+}
+
 // ===========================================================================
 // rcclUseHierarchicalAllGather -- rccl_wrap.cc:706-713. No cached statics
 // (rcclParamHierarchicalAllGather's real default is 1, the "enabled" value,

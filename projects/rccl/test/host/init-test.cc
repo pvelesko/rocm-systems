@@ -5583,6 +5583,24 @@ TEST_F(InitMicrotest, ComputeBuffSizes_SingleNodeAllNvlink_UsesTheNvlinkChunkSiz
   EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
   EXPECT_EQ(1 << 19, s.comm()->p2pChunkSize);
 }
+TEST_F(InitMicrotest, ComputeBuffSizes_AllNvlink_TakesTheRcclNvlChunkSizeOverride) {
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = true;
+  g_rcclP2pNvlChunkSize = 1 << 17;  // what rcclP2pNvlChunkSize returns for an MNNVL clique across hosts
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(1 << 19, g_rcclP2pNvlChunkSizeLastDefault) << "the hook must be handed NCCL_P2P_NVL_CHUNKSIZE's value";
+  EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);
+}
+TEST_F(InitMicrotest, ComputeBuffSizes_NotAllNvlink_SkipsTheRcclNvlChunkSizeOverride) {
+  BuffSizes_Scene s;
+  s.comm()->nNodes = 1;
+  s.comm()->isAllNvlink = false;
+  g_rcclP2pNvlChunkSize = 12345;
+  EXPECT_EQ(ncclSuccess, computeBuffSizes(s.comm()));
+  EXPECT_EQ(-1, g_rcclP2pNvlChunkSizeLastDefault);
+  EXPECT_EQ(1 << 17, s.comm()->p2pChunkSize);  // NCCL_P2P_PCI_CHUNKSIZE default
+}
 TEST_F(InitMicrotest, ComputeBuffSizes_ChunkExceedsSimpleBuffer_ClampsToOneStep) {
   BuffSizes_Scene s;
   s.comm()->nNodes = 1;

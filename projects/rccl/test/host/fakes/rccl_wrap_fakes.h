@@ -112,6 +112,10 @@ extern int64_t g_rcclParamHierarchicalReduceScatter;
 extern int64_t g_rcclParamCeAllReduce;
 extern int64_t g_rcclParamCeReduceScatter;
 extern int64_t g_rcclParamCeArStagingBytes;
+// rcclP2pNvlChunkSize (computeBuffSizes, init.cc). Returns g_rcclP2pNvlChunkSize when >= 0, else
+// passes the NCCL default through; g_rcclP2pNvlChunkSizeLastDefault records the default it was given.
+extern int64_t g_rcclP2pNvlChunkSize;
+extern int64_t g_rcclP2pNvlChunkSizeLastDefault;
 
 // checkHsaEnvSetting's HSA_* scratch validation (rccl_wrap.cc). g_lastHsaScratchEnv records the
 // hsaScratchEnv argument, which is the only proof the check read the environment at all.

@@ -324,6 +324,10 @@ bool rcclCollectiveMustUseEnqueuePath(struct ncclComm* comm);
 bool ncclCommIsSuspended(struct ncclComm* comm);
 void rcclSetPxn(struct ncclComm* comm, int& rcclPxnDisable);
 void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize);
+// NCCL_P2P_NVL_CHUNKSIZE default for comm: 128 kB for an MNNVL/UALoE clique fused across
+// multiple physical hosts (the size those comms used before they became isAllNvlink), else
+// nvlChunkSize. An explicit NCCL_P2P_NVL_CHUNKSIZE always wins.
+int64_t rcclP2pNvlChunkSize(const struct ncclComm* comm, int64_t nvlChunkSize);
 // Segments behind the whole NET registration, not the collective's slice (cached).
 ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments);
 // Graph variant: no-op for a NULL record; drops the graph reference on failure or when =0 skips a multi-segment record.

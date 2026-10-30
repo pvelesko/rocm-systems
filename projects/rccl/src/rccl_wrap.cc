@@ -2758,6 +2758,13 @@ void rcclSetP2pNetChunkSize(struct ncclComm* comm, int& rcclP2pNetChunkSize) {
   rcclP2pNetChunkSize = p2pNetChunkSize;
 }
 
+int64_t rcclP2pNvlChunkSize(const struct ncclComm* comm, int64_t nvlChunkSize) {
+  if (rcclEnvIsSet("NCCL_P2P_NVL_CHUNKSIZE") || !comm->MNNVL || comm->topo->nHosts <= 1) return nvlChunkSize;
+  INFO(NCCL_INIT, "RCCL P2P NVL chunk size default set to: %d (MNNVL clique across %d hosts)", 1 << 17,
+       comm->topo->nHosts);
+  return 1 << 17;
+}
+
 // Usable means generated AND compiled for this arch; the Generated flag alone lets gfx1250-only unrolls trap.
 enum ncclUnrollAvailability {
   ncclUnrollUsable,

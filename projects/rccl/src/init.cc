@@ -1667,7 +1667,7 @@ static ncclResult_t computeBuffSizes(struct ncclComm* comm) {
   if (comm->nNodes > 1) {
     rcclSetP2pNetChunkSize(comm, comm->p2pChunkSize);
     comm->p2pChunkSize = (comm->p2pChunkSize > RCCL_VALUE_INVALID) ? comm->p2pChunkSize : ncclParamP2pNetChunkSize();
-  } else if (comm->isAllNvlink) comm->p2pChunkSize = ncclParamP2pNvlChunkSize();
+  } else if (comm->isAllNvlink) comm->p2pChunkSize = rcclP2pNvlChunkSize(comm, ncclParamP2pNvlChunkSize());
   else comm->p2pChunkSize = ncclParamP2pPciChunkSize();
 
   // Make sure P2P chunksize is not larger than coll chunksize.

@@ -196,7 +196,6 @@ int64_t g_rcclParamCeReduceScatter = 0;            // rccl_wrap.cc:70 RCCL_PARAM
 int64_t rcclParamCeReduceScatter() { return g_rcclParamCeReduceScatter; }
 int64_t g_rcclParamCeArStagingBytes = -1;          // rccl_wrap.cc:73 RCCL_PARAM default
 int64_t rcclParamCeArStagingBytes() { return g_rcclParamCeArStagingBytes; }
-
 static ncclResult_t DefaultSelectAllReduce(struct ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t,
                                            hipStream_t, bool, bool, struct rcclCollDecision*) {
   FailLoudUnfaked("rccl_wrap_fakes", "rcclSelectAllReduce");
@@ -346,6 +345,8 @@ void ResetRcclWrapFakes() {
   g_rcclParamCeAllReduce = -1;
   g_rcclParamCeReduceScatter = 0;
   g_rcclParamCeArStagingBytes = -1;
+  g_rcclP2pNvlChunkSize = -1;
+  g_rcclP2pNvlChunkSizeLastDefault = -1;
   g_rcclUpdateCollectiveProtocolCalls = 0;
   g_rcclUpdateCollectiveAlgorithmCalls = 0;
   g_rcclUpdateCollectiveAlgorithmBeforeProtocol = false;
@@ -412,6 +413,12 @@ void rcclSetDefaultBuffSizes(struct ncclComm*, int* defaults) {
   defaults[2] = 1 << 22;  // SIMPLE
 }
 void rcclSetP2pNetChunkSize(struct ncclComm*, int& sz) { sz = 1 << 17; }
+int64_t g_rcclP2pNvlChunkSize = -1;
+int64_t g_rcclP2pNvlChunkSizeLastDefault = -1;
+int64_t rcclP2pNvlChunkSize(const struct ncclComm*, int64_t nvlChunkSize) {
+  g_rcclP2pNvlChunkSizeLastDefault = nvlChunkSize;
+  return g_rcclP2pNvlChunkSize >= 0 ? g_rcclP2pNvlChunkSize : nvlChunkSize;
+}
 
 bool rcclCeAllReduceEnabled(const struct ncclComm*) {
   if (g_rcclParamCeAllReduce >= 0) return g_rcclParamCeAllReduce != 0;
