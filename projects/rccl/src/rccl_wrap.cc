@@ -2310,6 +2310,7 @@ static bool rcclDdaBcEnabled(const rcclArchThresholds* table) {
 
 ncclResult_t rcclSelectBroadcast(struct ncclComm* comm, size_t count, ncclDataType_t datatype, int root, bool query,
                                  struct rcclCollDecision* decision) {
+  if (comm == nullptr) return ncclInvalidArgument;
   memset(decision, 0, sizeof(*decision));
   decision->algo = NCCL_ALGO_RING;
   decision->protocol = NCCL_PROTO_SIMPLE;
