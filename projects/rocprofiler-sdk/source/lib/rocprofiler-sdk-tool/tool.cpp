@@ -145,8 +145,38 @@ rocprofv3_error_signal_handler(int signo, siginfo_t*, void*);
 
 namespace
 {
-// Thread for safe cleanup output generation
-auto output_generation_thread = common::Synchronized<std::optional<std::thread>>{};
+std::atomic<bool> tool_child_process{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+
+bool
+tool_child_abandoned() noexcept
+{
+    return tool_child_process.load(std::memory_order_acquire);
+}
+
+void
+register_tool_fork_handler()
+{
+    static auto once = std::once_flag{};
+    std::call_once(once, []() {
+        const int status = ::pthread_atfork(nullptr, nullptr, []() {
+            tool_child_process.store(true, std::memory_order_release);
+            common::abandon_static_objects_after_fork();
+        });
+        ROCP_FATAL_IF(status != 0) << "failed to register rocprofv3 fork handler: " << status;
+    });
+}
+
+// Parent teardown explicitly joins this thread. Heap ownership lets a plain-fork child leave the
+// inherited mutex and std::thread untouched during C++ static destruction.
+using output_thread_state = common::Synchronized<std::optional<std::thread>>;
+
+auto&
+get_output_generation_thread()
+{
+    static auto* state = new output_thread_state{};
+    return *state;
+}
 
 // Tracks whether tool_detach produced output for the current attach session.
 // Set true by tool_detach, reset false by tool_attach (new session), read by tool_fini.
@@ -581,6 +611,8 @@ record_execution_profile(rocprofiler_thread_id_t                            thr_
                          rocprofiler_user_data_t* /*external_corr_id*/,
                          void* /*user_data*/)
 {
+    if(tool_child_abandoned()) return 1;
+
     auto _record_data = [](tool::execution_profile_data&                      _data,
                            rocprofiler_thread_id_t                            _thr_id,
                            rocprofiler_context_id_t                           _ctx_id,
@@ -636,6 +668,8 @@ set_kernel_rename_and_stream_correlation_id(rocprofiler_thread_id_t  thr_id,
                                             rocprofiler_user_data_t* external_corr_id,
                                             void*                    user_data)
 {
+    if(tool_child_abandoned()) return 1;
+
     // Check whether services are enabled
     const bool kernel_rename_service_enabled =
         kind == ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH &&
@@ -688,6 +722,8 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 cb_data)
 {
+    if(tool_child_abandoned()) return;
+
     static auto    pause_resume_count = std::atomic<int64_t>{0};
     constexpr auto null_context_id    = rocprofiler_context_id_t{.handle = 0};
     auto*          ctxs               = static_cast<context_id_set_t*>(cb_data);
@@ -829,6 +865,8 @@ kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
                        void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     if(thread_dispatch_rename == nullptr) return;
 
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
@@ -880,6 +918,8 @@ hip_stream_display_callback(rocprofiler_callback_tracing_record_t record,
                             rocprofiler_user_data_t*              user_data,
                             void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_STREAM) return;
     // Extract stream ID from record
     auto* stream_handle_data =
@@ -927,6 +967,8 @@ hip_graph_display_callback(rocprofiler_callback_tracing_record_t record,
                            rocprofiler_user_data_t*              user_data,
                            void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_HIP_GRAPH) return;
 
     auto* payload = static_cast<rocprofiler_callback_tracing_hip_graph_data_t*>(record.payload);
@@ -949,6 +991,8 @@ runtime_initialization_callback(rocprofiler_callback_tracing_record_t record,
                                 rocprofiler_user_data_t*              user_data,
                                 void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION) return;
     ROCP_CI_LOG_IF(WARNING, tool_metadata == nullptr)
         << fmt::format("tool cannot record runtime initialization for {}",
@@ -987,6 +1031,8 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                           rocprofiler_user_data_t*              user_data,
                           void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_RANGE_API)
     {
         auto* marker_data =
@@ -1105,6 +1151,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                              rocprofiler_user_data_t*              user_data,
                              void*                                 data)
 {
+    if(tool_child_abandoned()) return;
+
     auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts), "get timestamp");
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
@@ -1280,6 +1328,8 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                           void* /* user_data*/,
                           uint64_t /*drop_count*/)
 {
+    if(tool_child_abandoned()) return;
+
     ROCP_INFO << "Executing buffered tracing callback for " << num_headers << " headers";
 
     if(!headers) return;
@@ -1847,6 +1897,8 @@ pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
                      void* /*data*/,
                      uint64_t /* drop_count*/)
 {
+    if(tool_child_abandoned()) return;
+
     if(!headers) return;
 
     // count number of valid VS invalid samples delivered by this callback
@@ -1943,6 +1995,8 @@ void
 att_shader_data_callback(rocprofiler_thread_trace_shader_data_t shader_data,
                          rocprofiler_user_data_t                userdata)
 {
+    if(tool_child_abandoned()) return;
+
     auto agent = shader_data.agent;
     auto se_id = shader_data.shader_engine_id;
     auto flags = shader_data.flags;
@@ -1974,6 +2028,8 @@ att_dispatch_callback(rocprofiler_agent_id_t /* agent_id  */,
                       void* /*userdata_config*/,
                       rocprofiler_user_data_t* userdata_shader)
 {
+    if(tool_child_abandoned()) return {};
+
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
     userdata_shader->value       = dispatch_id;
 
@@ -1987,6 +2043,8 @@ att_dispatch_consecutive_kernel_callback(rocprofiler_callback_tracing_record_t r
                                          rocprofiler_user_data_t* /*user_data*/,
                                          void* userdata)
 {
+    if(tool_child_abandoned()) return;
+
     using capture_ids_set_t = common::Synchronized<std::unordered_set<rocprofiler_dispatch_id_t>>;
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) return;
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT) return;
@@ -2072,6 +2130,8 @@ counter_dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_
                           rocprofiler_user_data_t*                     user_data,
                           void* /*callback_data_args*/)
 {
+    if(tool_child_abandoned()) return;
+
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
@@ -2121,6 +2181,8 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
                         rocprofiler_user_data_t                      user_data,
                         void* /*callback_data_args*/)
 {
+    if(tool_child_abandoned()) return;
+
     static const auto gpu_agents              = get_gpu_agents();
     static const auto gpu_agents_counter_info = get_agent_counter_info();
 
@@ -2275,6 +2337,8 @@ spm_dispatch_callback(const rocprofiler_spm_dispatch_counting_service_data_t* di
                       rocprofiler_user_data_t*                                user_data,
                       void* /*callback_data_args*/)
 {
+    if(tool_child_abandoned()) return;
+
     static auto kernel_iteration = common::Synchronized<kernel_iteration_t, true>{};
 
     if(!is_targeted_kernel(dispatch_data->dispatch_info.kernel_id, kernel_iteration))
@@ -2296,6 +2360,8 @@ spm_data_callback(const rocprofiler_spm_dispatch_counting_service_data_t* dispat
                   rocprofiler_user_data_t                                 user_data,
                   void* /* record_callback_args*/)
 {
+    if(tool_child_abandoned()) return;
+
     if((flags & ROCPROFILER_SPM_RECORD_FLAG_DISPATCH_END) != 0)
     {
         auto dispatch_data_copy = *dispatch_data;
@@ -2497,6 +2563,8 @@ wait_peer_finished(const pid_t& pid, const pid_t& ppid)
 void
 finalize_rocprofv3(std::string_view context)
 {
+    if(tool_child_abandoned()) return;
+
     using status_t = tool::finalization_gate::status;
 
     auto& sw = get_signal_worker();
@@ -2626,6 +2694,8 @@ uint64_t
 kernel_replay_pass_count_callback(rocprofiler_kernel_dispatch_info_t dispatch_info,
                                   rocprofiler_user_data_t /*user_data*/)
 {
+    if(tool_child_abandoned()) return 1;
+
     auto&      agent_profiles = get_agent_profiles();
     const auto profiles       = agent_profiles.profiles.find(dispatch_info.agent_id);
     const auto n =
@@ -2640,6 +2710,8 @@ kernel_replay_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t* /*user_data*/,
                        void* /*data*/)
 {
+    if(tool_child_abandoned()) return;
+
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY) return;
 
     auto* payload = static_cast<rocprofiler_callback_tracing_kernel_replay_data_t*>(record.payload);
@@ -2909,6 +2981,8 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
             uint64_t                  context_ids_length,
             void* /*tool_data*/)
 {
+    if(tool_child_abandoned()) return 0;
+
     // Reset the detach output flag for this new session. If the process exits during this
     // attach (without a corresponding tool_detach), tool_fini will see false and generate
     // output for whatever was captured. tool_detach sets it true when it produces output.
@@ -2922,7 +2996,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
         ROCP_INFO << "If files are still being written from the last detach, there will be a delay "
                      "until this process is finished";
     }
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+    get_output_generation_thread().wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     // save the existing config for comparison
     auto original_config = tool::get_config();
@@ -3168,6 +3242,8 @@ apply_core_capability_gates(tool::config& cfg)
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
+    if(tool_child_abandoned()) return 0;
+
     static constexpr auto null_context_id = rocprofiler_context_id_t{.handle = 0};
     static constexpr auto null_buffer_id  = rocprofiler_buffer_id_t{.handle = 0};
 
@@ -4026,6 +4102,8 @@ api_timestamps_callback(rocprofiler_intercept_table_t table_id,
                         uint64_t /*num_tables*/,
                         void* /*user_data*/)
 {
+    if(tool_child_abandoned()) return;
+
     static auto _once = std::once_flag{};
 
     // compute major/minor/patch version info
@@ -4514,6 +4592,8 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 void
 tool_detach(void* /*tool_data*/)
 {
+    if(tool_child_abandoned()) return;
+
     detach_output_generated = true;
 
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
@@ -4536,7 +4616,8 @@ tool_detach(void* /*tool_data*/)
     {
         // Synchronous output generation - complete before returning
         // This ensures output files are fully written before detach returns
-        ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+        get_output_generation_thread().wlock(
+            [](auto& thread_ptr) { reset_output_thread(thread_ptr); });
         generate_output(cleanup_mode::reset);
     }
     else
@@ -4544,7 +4625,7 @@ tool_detach(void* /*tool_data*/)
         // Launch generate output in an async background thread
         // This allows tool_detach to return immediately without waiting.
         // The thread will be joined later in tool_attach (for reattachment) or tool_fini
-        ::output_generation_thread.wlock([](auto& thread_ptr) {
+        get_output_generation_thread().wlock([](auto& thread_ptr) {
             reset_output_thread(thread_ptr);
             thread_ptr.emplace([]() {
                 try
@@ -4577,7 +4658,7 @@ tool_fini_impl()
     }
 
     // Join the cleanup thread if it exists and is active
-    ::output_generation_thread.wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
+    get_output_generation_thread().wlock([](auto& thread_ptr) { reset_output_thread(thread_ptr); });
 
     auto _fini_timer = common::simple_timer{"[rocprofv3] tool finalization"};
 
@@ -4622,6 +4703,8 @@ tool_fini_impl()
 void
 tool_fini(void* /*tool_data*/)
 {
+    if(tool_child_abandoned()) return;
+
     auto status = get_signal_worker().tool_finalization.run_or_wait([]() { tool_fini_impl(); });
     ROCP_INFO_IF(status != tool::finalization_gate::status::ran)
         << "tool_fini ignored: finalization already running or complete";
@@ -5021,6 +5104,13 @@ rocprofv3_error_signal_handler(int signo, siginfo_t* info, void* ucontext)
     (void) info;
     (void) ucontext;
 
+    if(tool_child_abandoned())
+    {
+        restore_signal_disposition(signo);
+        raise(signo);
+        return;
+    }
+
     auto& sw = get_signal_worker();
 
     // Our handler being installed means the app doesn't coordinate shutdown.
@@ -5135,6 +5225,9 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
+    register_tool_fork_handler();
+    if(tool_child_abandoned()) return nullptr;
+
     initialize_logging();
 
     // set the client name
@@ -5212,6 +5305,8 @@ rocprofiler_configure_attach(uint32_t /*version*/,
                              uint32_t /*priority*/,
                              rocprofiler_client_id_t* /*id*/)
 {
+    if(tool_child_abandoned()) return nullptr;
+
     // This function is called right after rocprofiler_configure with the same parameters.
     // The data returned is only used when attaching to a running process.
 
@@ -5243,6 +5338,7 @@ sighandler_t
 rocprofv3_signal(int signum, sighandler_t handler)
 {
     if(!get_signal_function()) get_signal_function() = (signal_func_t) dlsym(RTLD_NEXT, "signal");
+    if(tool_child_abandoned()) return get_signal_function()(signum, handler);
 
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_signal_function()(signum, handler);
@@ -5266,6 +5362,7 @@ rocprofv3_sigaction(int signum,
 {
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
+    if(tool_child_abandoned()) return get_sigaction_function()(signum, act, oldact);
 
     if(get_signal_worker().handling.load(std::memory_order_relaxed) != 0)
         return get_sigaction_function()(signum, act, oldact);
@@ -5307,6 +5404,9 @@ rocprofv3_sigaction(int signum,
 int
 rocprofv3_main(int argc, char** argv, char** envp)
 {
+    register_tool_fork_handler();
+    if(tool_child_abandoned()) return get_main_function()(argc, argv, envp);
+
     auto convert_to_vec = [](char** inp) {
         auto        _data = std::vector<std::string_view>{};
         size_t      n     = 0;
@@ -5334,52 +5434,36 @@ rocprofv3_main(int argc, char** argv, char** envp)
     if(!get_sigaction_function())
         get_sigaction_function() = (sigaction_func_t) dlsym(RTLD_NEXT, "sigaction");
 
-    // fork+exec and spawn children re-init through the normal init path. Plain fork children
-    // re-init worker state via the pthread_atfork handler below. GPU use in a forked child is
-    // illegal (runtime not fork-safe) so it usually dies first, but host-side data like roctx
-    // markers still flushes if reached (covered by a test).
+    // fork+exec and spawn children re-init through the normal init path. A plain-fork child never
+    // uses this inherited worker because every tool entry fails closed on PID ownership.
     {
         auto& sw   = get_signal_worker();
         sw.eventfd = eventfd(0, EFD_CLOEXEC);
         if(sw.eventfd >= 0) sw.thread = std::thread{signal_finalization_worker};
-
-        // Register atfork handler so fork() children get a fresh worker thread.
-        // Without this, fork children inherit the parent's stale eventfd/thread.
-        static bool atfork_registered = false;
-        if(!atfork_registered)
-        {
-            atfork_registered = true;
-            pthread_atfork(nullptr, nullptr, []() {
-                // Child handler: reset stale state and spawn a fresh worker.
-                auto& child_sw = get_signal_worker();
-                if(child_sw.eventfd >= 0 && ::close(child_sw.eventfd) != 0)
-                {
-                    ROCP_WARNING << "signal worker: close(eventfd) after fork failed: "
-                                 << strerror(errno);
-                }
-
-                ::new(static_cast<void*>(&child_sw)) signal_worker_state{};
-                child_sw.eventfd = eventfd(0, EFD_CLOEXEC);
-                if(child_sw.eventfd >= 0) child_sw.thread = std::thread{signal_finalization_worker};
-            });
-        }
     }
 
     initialize_signal_handler(get_sigaction_function());
 
     ROCP_INFO << "rocprofv3: main function wrapper will be invoked...";
 
-    auto _main_timer = std::optional<common::simple_timer>{};
+    auto _main_timer = std::unique_ptr<common::simple_timer>{};
 
     // should never happen but if it does, don't time
     if(!_argv.empty())
-        _main_timer = common::simple_timer{
-            fmt::format("[rocprofv3] '{}'", fmt::join(_argv.begin(), _argv.end(), " "))};
+        _main_timer = std::make_unique<common::simple_timer>(
+            fmt::format("[rocprofv3] '{}'", fmt::join(_argv.begin(), _argv.end(), " ")));
 
     if(tool_metadata && tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
+
+    if(tool_child_abandoned())
+    {
+        // The timer belongs to the inherited parent stack and may log during destruction.
+        _main_timer.release();
+        return ret;
+    }
 
     if(tool_metadata && tool_metadata->process_end_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_end_ns));

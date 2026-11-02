@@ -24,6 +24,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <mutex>
 #include <set>
@@ -53,11 +54,13 @@ CodeobjCallbackRegistry::CodeobjCallbackRegistry(LoadCallback _ld, UnloadCallbac
 : ld_fn(std::move(_ld))
 , unld_fn(std::move(_unld))
 {
+    if(registration::fork_child_abandoned()) return;
     get_registries().wlock([this](set_type_t& t) { t.insert(this); });
 }
 
 CodeobjCallbackRegistry::~CodeobjCallbackRegistry()
 {
+    if(registration::fork_child_abandoned()) return;
     if(auto* reg = _static_registries()) reg->wlock([this](set_type_t& t) { t.erase(this); });
 }
 
@@ -118,6 +121,7 @@ notify_registries(hsa_executable_t executable)
 void
 executable_freeze_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return;
     notify_registries(executable);
 }
 
@@ -127,6 +131,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
     // Call underlying function
     hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
     if(status != HSA_STATUS_SUCCESS) return status;
+    if(registration::fork_child_abandoned()) return status;
 
     executable_freeze_internal(executable);
     return HSA_STATUS_SUCCESS;
@@ -135,6 +140,8 @@ executable_freeze(hsa_executable_t executable, const char* options)
 void
 executable_destroy_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return;
+
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
             if(code_object.hsa_executable != executable)
@@ -154,6 +161,9 @@ executable_destroy_internal(hsa_executable_t executable)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned())
+        return CHECK_NOTNULL(get_destroy_function())(executable);
+
     executable_destroy_internal(executable);
     // Call underlying function
     return CHECK_NOTNULL(get_destroy_function())(executable);

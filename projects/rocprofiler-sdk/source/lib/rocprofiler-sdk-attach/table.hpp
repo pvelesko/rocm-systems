@@ -37,5 +37,11 @@ get_dispatch_registration_table();
 void
 dispatch_table_init();
 
+void
+register_fork_handler();
+
+bool
+fork_child_abandoned() noexcept;
+
 }  // namespace attach
 }  // namespace rocprofiler

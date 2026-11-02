@@ -130,6 +130,7 @@ rocprofiler_attach_set_api_table(const char* name,
                                  uint64_t                                      num_tables,
                                  rocprofiler_register_library_api_table_func_t register_functor)
 {
+    rocprofiler::attach::register_fork_handler();
     rocprofiler::common::init_logging("ROCPROFILER_ATTACH");
 
     get_background_thread()->start();

@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/kfd/defines.hpp"
 #include "lib/rocprofiler-sdk/kfd/kfd_profiler.hpp"
 #include "lib/rocprofiler-sdk/kfd/utils.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
@@ -1026,8 +1027,6 @@ public:
         std::swap(ptr, _config);
         delete ptr;
     }
-
-    static void reset_on_fork() { _config = nullptr; }
 };
 
 namespace
@@ -1670,19 +1669,14 @@ namespace kfd
 rocprofiler_status_t
 init()
 {
+    if(registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     // Prevent re-init for different buffer op kinds
     static bool                 init_done{false};
     static rocprofiler_status_t retcode{ROCPROFILER_STATUS_ERROR};
 
     if(!init_done)
     {
-        pthread_atfork(nullptr, nullptr, []() {
-            // null out child's copy on fork and reinitialize
-            // otherwise all children wait on the same thread to join
-            config::reset_on_fork();
-            init(std::make_index_sequence<KFD_EVENT_LAST>{});
-        });
-
         retcode   = init(std::make_index_sequence<KFD_EVENT_LAST>{});
         init_done = true;
     }
@@ -1693,6 +1687,8 @@ init()
 void
 finalize()
 {
+    if(registration::fork_child_abandoned()) return;
+
     shutdown_kfd_profiler();
     config::reset();
 }

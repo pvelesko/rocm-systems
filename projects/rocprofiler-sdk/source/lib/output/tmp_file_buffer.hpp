@@ -28,6 +28,7 @@
 
 #include "lib/common/container/ring_buffer.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/units.hpp"
 
 #include <fmt/format.h>
@@ -143,6 +144,8 @@ template <typename Tp>
 void
 write_ring_buffer(Tp _v, domain_type type)
 {
+    if(common::static_objects_abandoned()) return;
+
     auto* filebuf = get_tmp_file_buffer<Tp>(type);
 
     if(!filebuf)

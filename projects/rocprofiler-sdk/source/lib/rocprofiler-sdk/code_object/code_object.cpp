@@ -35,6 +35,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_interposition.hpp"
 #include "lib/rocprofiler-sdk/kfd/signal_less_gate.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -975,6 +976,8 @@ initialize_hip_binary_data()
 hsa_status_t
 executable_freeze_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return HSA_STATUS_SUCCESS;
+
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
     (void) initialize_hip_binary_data();
 
@@ -1137,6 +1140,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
 {
     hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
     if(status != HSA_STATUS_SUCCESS) return status;
+    if(registration::fork_child_abandoned()) return status;
     return rocprofiler::code_object::executable_freeze_internal(executable);
 }
 
@@ -1147,6 +1151,8 @@ executable_freeze(hsa_executable_t executable, const char* options)
 void
 executable_destroy_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return;
+
     auto _lk = std::unique_lock{get_destroy_mutex()};
 
     if(is_shutdown.load(std::memory_order_acquire))
@@ -1201,6 +1207,9 @@ executable_destroy_internal(hsa_executable_t executable)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned())
+        return CHECK_NOTNULL(get_destroy_function())(executable);
+
     // Serialize all executable_destroy calls to prevent:
     // 1. Concurrent access to code objects in shutdown()
     // 2. Use-after-free when multiple threads destroy same executable
@@ -1212,6 +1221,9 @@ executable_destroy(hsa_executable_t executable)
 void**
 hip_register_fat_binary(const void* data)
 {
+    if(registration::fork_child_abandoned())
+        return CHECK_NOTNULL(get_hip_register_fatbinary_function())(data);
+
     const hip::hip_fat_binary_wrapper* fbwrapper =
         reinterpret_cast<const hip::hip_fat_binary_wrapper*>(data);
     ROCP_ERROR_IF(!hip::is_valid_fat_binary_wrapper(*fbwrapper)) << "register fat binary failed";
@@ -1245,6 +1257,12 @@ hip_register_fat_binary(const void* data)
 void
 hip_unregister_fat_binary(void** modules)
 {
+    if(registration::fork_child_abandoned())
+    {
+        CHECK_NOTNULL(get_hip_unregister_fatbinary_function())(modules);
+        return;
+    }
+
     // HIP unregisters a fat binary when the library containing it is unloaded, after which the
     // fat binary is no longer mapped and must not be parsed by initialize_hip_binary_data. This
     // can be invoked from library destructors after the static objects have been destroyed.
@@ -1271,6 +1289,22 @@ hip_register_function(void**       modules,
                       dim3*        grid_dim,
                       int*         workgroup_size)
 {
+    if(registration::fork_child_abandoned())
+    {
+        CHECK_NOTNULL(get_hip_register_function_function())
+        (modules,
+         host_function,
+         device_function,
+         device_name,
+         thread_limit,
+         thread_id,
+         block_id,
+         block_dim,
+         grid_dim,
+         workgroup_size);
+        return;
+    }
+
     auto convert_to_dim3 = [](auto* val) {
         return (val) ? rocprofiler_dim3_t{.x = val->x, .y = val->y, .z = val->z}
                      : rocprofiler_dim3_t{0, 0, 0};

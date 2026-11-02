@@ -35,12 +35,12 @@
 // Bad case (--no-app-signal-handler): app has SIG_DFL everywhere.
 //   Profiler's signal handler is the only thing that can flush data before death.
 //
-// TODO: --raw-fork (_Fork without exec) is not supported. _Fork skips
-// pthread_atfork handlers, leaving stale profiler state. Extremely rare in practice.
+// _Fork and vfork skip pthread_atfork handlers and are outside rocprofv3's fork contract.
 
 #include <hip/hip_runtime.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 
+#include <dlfcn.h>
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/wait.h>
@@ -57,6 +57,19 @@
 namespace
 {
 std::atomic<bool> g_shutdown{false};
+
+bool
+profiler_is_disabled_in_child()
+{
+    using query_type = int (*)(int*);
+    auto initialized =
+        reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_initialized"));
+    auto finalized = reinterpret_cast<query_type>(dlsym(RTLD_DEFAULT, "rocprofiler_is_finalized"));
+    int  init      = -1;
+    int  fini      = -1;
+    return initialized && finalized && initialized(&init) == 0 && finalized(&fini) == 0 &&
+           init == 0 && fini == 1;
+}
 
 template <typename... Args>
 std::string
@@ -149,6 +162,8 @@ run_kernels(const char* label)
 void
 fork_child_worker(int id, int pipe_rd)
 {
+    if(!profiler_is_disabled_in_child()) std::_Exit(78);
+
     signal(SIGINT, SIG_IGN);
     fcntl(pipe_rd, F_SETFL, O_NONBLOCK);
 
@@ -250,7 +265,12 @@ mode_good_fork()
         close(pipes[i][1]);
     }
     for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    {
+        int status = 0;
+        if(waitpid(children[i], &status, 0) != children[i] || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"plain-fork child contract check failed"};
+    }
 
     emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
@@ -284,7 +304,12 @@ mode_good_fork_exec(const char* self_path)
     run_kernels("parent");
 
     for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    {
+        int status = 0;
+        if(waitpid(children[i], &status, 0) != children[i] || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"plain-fork child contract check failed"};
+    }
 
     emit_roctx_marker("exit_marker parent fork-exec ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: clean exit\n", getpid());
@@ -353,6 +378,7 @@ mode_bad_fork()
         pid_t pid = fork();
         if(pid == 0)
         {
+            if(!profiler_is_disabled_in_child()) std::_Exit(78);
             run_kernels(str_join("child_", i).c_str());
             emit_roctx_marker("exit_marker child fork ppid:%d pid:%d", getppid(), getpid());
             exit(0);
@@ -363,7 +389,12 @@ mode_bad_fork()
     run_kernels("parent");
 
     for(int i = 0; i < NUM_CHILDREN; i++)
-        waitpid(children[i], nullptr, 0);
+    {
+        int status = 0;
+        if(waitpid(children[i], &status, 0) != children[i] || !WIFEXITED(status) ||
+           WEXITSTATUS(status) != 0)
+            throw std::runtime_error{"plain-fork child contract check failed"};
+    }
 
     emit_roctx_marker("exit_marker parent fork ppid:%d pid:%d", getppid(), getpid());
     fprintf(stderr, "Parent PID=%d: exit\n", getpid());

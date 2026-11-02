@@ -48,6 +48,8 @@ thread_local auto _static_tl_object_dtor = std::optional<scope_destructor>{};
 void
 destroy_static_tl_objects()
 {
+    if(static_objects_abandoned()) return;
+
     if(auto*& _stack = get_static_tl_object_stack(); _stack)
     {
         while(!_stack->empty())
@@ -65,6 +67,8 @@ destroy_static_tl_objects()
 void
 register_static_tl_dtor(static_dtor_func_t&& _func)
 {
+    if(static_objects_abandoned()) return;
+
     // make sure the thread-local scope destructor exists
     if(!_static_tl_object_dtor)
         _static_tl_object_dtor = scope_destructor{[]() { destroy_static_tl_objects(); }};

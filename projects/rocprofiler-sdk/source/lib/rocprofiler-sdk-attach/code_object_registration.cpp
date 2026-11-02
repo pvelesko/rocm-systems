@@ -36,6 +36,12 @@
 
 namespace
 {
+bool
+inherited_attach_child() noexcept
+{
+    return rocprofiler::attach::fork_child_abandoned();
+}
+
 using hsa_executable_freeze_t  = decltype(CoreApiTable::hsa_executable_freeze_fn);
 using hsa_executable_destroy_t = decltype(CoreApiTable::hsa_executable_destroy_fn);
 using hsa_loader_table_t       = hsa_ven_amd_loader_1_01_pfn_t;
@@ -142,6 +148,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
     {
         return status;
     }
+    if(inherited_attach_child()) return status;
 
     // Copy ELF bytes for memory-backed code objects now, while still inside the
     // application's call to hsa_executable_freeze. This is the only point at
@@ -169,6 +176,8 @@ hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
+    if(inherited_attach_child()) return registration->hsa_executable_destroy_fn(executable);
+
     ROCP_TRACE << "removing code_object " << executable.handle;
 
     // Collect the loaded_code_object handles whose cached bytes belong to this
@@ -221,6 +230,8 @@ executable_destroy(hsa_executable_t executable)
 int
 iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     auto* registration = CHECK_NOTNULL(get_code_object_registration());
 
     auto snapshot = code_object_collection_t{};
@@ -239,6 +250,8 @@ iterate_all_code_objects(rocprof_attach_code_object_iterator_t func, void* data)
 int
 add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!cb)
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -260,6 +273,8 @@ add_code_object_cb(rocprofiler_attach_code_object_cb_t cb, void* data)
 int
 remove_code_object_cb(rocprofiler_attach_code_object_cb_t cb)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!cb)
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -279,6 +294,8 @@ lookup_memory_codeobj_data(hsa_loaded_code_object_t loaded_code_object,
                            const void**             data_out,
                            uint64_t*                size_out)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!data_out || !size_out) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto* registration = CHECK_NOTNULL(get_code_object_registration());

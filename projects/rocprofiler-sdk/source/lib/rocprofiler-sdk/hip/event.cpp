@@ -538,6 +538,8 @@ template <event_record_fn_t saved_table_t::*SavedField>
 hipError_t
 event_record_impl(hipEvent_t event, hipStream_t stream)
 {
+    if(registration::fork_child_abandoned()) return (get_saved_table().*SavedField)(event, stream);
+
     g_active_event_ctx = {
         ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
     auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
@@ -550,6 +552,9 @@ event_record_impl(hipEvent_t event, hipStream_t stream)
 hipError_t
 event_record_with_flags_impl(hipEvent_t event, hipStream_t stream, unsigned int flags)
 {
+    if(registration::fork_child_abandoned())
+        return get_saved_table().hipEventRecordWithFlags_fn(event, stream, flags);
+
     g_active_event_ctx = {
         ROCPROFILER_HIP_EVENT_RECORD, reinterpret_cast<uint64_t>(event), false, stream};
     auto _cleanup = common::scope_destructor{[]() { g_active_event_ctx = {}; }};
@@ -653,6 +658,9 @@ template <stream_wait_event_fn_t saved_table_t::*SavedField>
 hipError_t
 stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
+    if(registration::fork_child_abandoned())
+        return (get_saved_table().*SavedField)(stream, event, flags);
+
     const auto hip_event_handle = reinterpret_cast<uint64_t>(event);
 
     g_active_event_ctx = {ROCPROFILER_HIP_EVENT_WAIT, hip_event_handle, false};
@@ -682,6 +690,8 @@ stream_wait_event_impl(hipStream_t stream, hipEvent_t event, unsigned int flags)
 hipError_t
 event_destroy_impl(hipEvent_t event)
 {
+    if(registration::fork_child_abandoned()) return get_saved_table().hipEventDestroy_fn(event);
+
     auto ret = get_saved_table().hipEventDestroy_fn(event);
     if(ret == hipSuccess) erase_event_info(reinterpret_cast<uint64_t>(event));
     return ret;

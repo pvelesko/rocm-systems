@@ -22,10 +22,12 @@
 
 #include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_tl_object.hpp"
 #include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
@@ -78,8 +80,9 @@ get_ompt_state_stack()
 {
     // for callbacks that don't have a place to stash context, we assume
     // a per-thread stack. otherwise we stash the saved state in the ompt_data_t field.
-    static thread_local auto _v = tracing::small_vector_t<ompt_save_state*, 8>{};
-    return _v;
+    using stack_type                 = tracing::small_vector_t<ompt_save_state*, 8>;
+    static thread_local auto*& stack = common::static_tl_object<stack_type>::construct();
+    return *stack;
 }
 
 auto*
@@ -90,8 +93,14 @@ get_ompt_data_proxy()
 }
 
 // Macros for access to appropriate ompt_data_t* proxy
-#define CLIENT(name)   (CHECK_NOTNULL(get_ompt_data_proxy())->get_client_ptr(name))
-#define INTERNAL(name) (CHECK_NOTNULL(get_ompt_data_proxy())->get_internal_ptr(name))
+#define CLIENT(name)                                                                               \
+    (registration::fork_child_abandoned()                                                          \
+         ? nullptr                                                                                 \
+         : CHECK_NOTNULL(get_ompt_data_proxy())->get_client_ptr(name))
+#define INTERNAL(name)                                                                             \
+    (registration::fork_child_abandoned()                                                          \
+         ? nullptr                                                                                 \
+         : CHECK_NOTNULL(get_ompt_data_proxy())->get_internal_ptr(name))
 
 void
 ompt_thread_begin_callback(ompt_thread_t thread_type, ompt_data_t* thread_data)
@@ -715,6 +724,7 @@ rocprof_ompt_cb_interface(rocprofiler_ompt_callback_functions_t& cb_functions)
 ompt_data_t*
 proxy_data_ptr(ompt_data_t* realptr)
 {
+    if(registration::fork_child_abandoned()) return nullptr;
     return (get_ompt_data_proxy())->get_client_ptr(realptr);
 }
 
@@ -747,6 +757,8 @@ template <typename... Args>
 void
 ompt_impl<OpIdx>::begin(ompt_data_t* data, Args... args)
 {
+    if(registration::fork_child_abandoned()) return;
+
     using info_type = ompt_info<OpIdx>;
 
     ROCP_TRACE << __FUNCTION__ << " :: " << info_type::name;
@@ -827,6 +839,8 @@ template <typename... Args>
 void
 ompt_impl<OpIdx>::end(ompt_data_t* data, Args... args)
 {
+    if(registration::fork_child_abandoned()) return;
+
     using info_type = ompt_info<OpIdx>;
 
     ROCP_TRACE << __FUNCTION__ << " :: " << info_type::name;
@@ -938,6 +952,8 @@ template <typename... Args>
 context::correlation_id*
 ompt_impl<OpIdx>::event_common(Args... args)
 {
+    if(registration::fork_child_abandoned()) return nullptr;
+
     using info_type = ompt_info<OpIdx>;
 
     ROCP_TRACE << __FUNCTION__ << " :: " << info_type::name;

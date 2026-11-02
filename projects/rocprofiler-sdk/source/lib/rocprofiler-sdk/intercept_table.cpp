@@ -286,6 +286,8 @@ rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t c
                                             int                                libs,
                                             void*                              data)
 {
+    if(rocprofiler::registration::fork_child_abandoned()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     // if this function is invoked after initialization, we cannot guarantee that the runtime
     // intercept API has not already be registered and returned to the runtime.
     if(rocprofiler::registration::get_init_status() > 0)

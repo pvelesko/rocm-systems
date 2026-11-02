@@ -33,10 +33,9 @@
 #include "lib/rocprofiler-sdk/counters/sample_consumer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
-
-#include <pthread.h>
 
 namespace rocprofiler
 {
@@ -59,6 +58,8 @@ namespace
 void
 process_completed_cb(completed_cb_params_t&& params)
 {
+    if(registration::fork_child_abandoned()) return;
+
     auto&       info          = params.info;
     auto&       session       = *params.session;
     const auto& packet        = *params.packet_data;
@@ -186,15 +187,7 @@ callback_thread_slot()
 callback_consumer_t&
 callback_thread_get()
 {
-    auto&                 consumer = *CHECK_NOTNULL(callback_thread_slot());
-    static std::once_flag once;
-    std::call_once(once, []() {
-        ::pthread_atfork(nullptr, nullptr, []() {
-            if(auto* v = callback_thread_slot())
-                ::new(v) callback_consumer_t{&process_completed_cb};
-        });
-    });
-    return consumer;
+    return *CHECK_NOTNULL(callback_thread_slot());
 }
 
 // Reference count for the callback consumer thread. Incremented by callback_thread_start()
@@ -235,6 +228,8 @@ int callback_thread_refcount = 0;
 void
 callback_thread_start()
 {
+    if(registration::fork_child_abandoned()) return;
+
     auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
     if(callback_thread_refcount++ == 0) callback_thread_get().start();
 }
@@ -242,6 +237,8 @@ callback_thread_start()
 void
 callback_thread_stop()
 {
+    if(registration::fork_child_abandoned()) return;
+
     auto _lk = std::unique_lock<std::mutex>{callback_thread_mut()};
     // The > 0 test keeps an unbalanced stop from driving the count negative and leaking the
     // consumer thread for the rest of the process.
@@ -257,6 +254,7 @@ callback_thread_stop()
 void
 process_callback_data(completed_cb_params_t&& params)
 {
+    if(registration::fork_child_abandoned()) return;
     callback_thread_get().add(std::move(params));
 }
 }  // namespace counters

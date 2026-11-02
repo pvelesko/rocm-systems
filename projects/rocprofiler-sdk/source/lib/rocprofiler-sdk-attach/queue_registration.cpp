@@ -30,6 +30,12 @@
 
 namespace
 {
+bool
+inherited_attach_child() noexcept
+{
+    return rocprofiler::attach::fork_child_abandoned();
+}
+
 using callback_t = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
 
 struct queue_entry_t
@@ -109,6 +115,12 @@ write_interceptor(const void*                             packets,
                   void*                                   data,
                   hsa_amd_queue_intercept_packet_writer_t writer)
 {
+    if(inherited_attach_child())
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
     ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a valid pointer";
     auto*       registration = CHECK_NOTNULL(get_queue_registration());
     const auto* entry        = static_cast<const queue_entry_t*>(data);
@@ -190,6 +202,9 @@ create_queue(hsa_agent_t        agent,
              hsa_queue_t**      queue)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
+    if(inherited_attach_child())
+        return registration->hsa_amd_queue_intercept_create_fn(
+            agent, size, type, callback, data, private_segment_size, group_segment_size, queue);
 
     // Create new queue in HSA
     hsa_queue_t* new_queue = nullptr;
@@ -239,6 +254,8 @@ hsa_status_t
 create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t num_descs)
 {
     auto* registration = CHECK_NOTNULL(get_queue_registration());
+    if(inherited_attach_child())
+        return registration->hsa_amd_queue_create_fn(agent, descs, num_descs);
 
     ROCP_FATAL_IF(!registration->hsa_amd_queue_intercept_create_fn ||
                   !registration->hsa_amd_profiling_set_profiler_enabled_fn ||
@@ -291,6 +308,8 @@ create_amd_queue(hsa_agent_t agent, hsa_amd_queue_create_desc_t* descs, uint32_t
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
+    if(inherited_attach_child()) return HSA_STATUS_SUCCESS;
+
     auto* registration = get_queue_registration();
     if(registration)
     {
@@ -331,6 +350,8 @@ destroy_queue(hsa_queue_t* hsa_queue)
 int
 iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     auto* registration = CHECK_NOTNULL(get_queue_registration());
 
     std::lock_guard lg(registration->mutex);
@@ -345,6 +366,8 @@ iterate_all_queues(rocprof_attach_queue_iterator_t func, void* user_data)
 int
 set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     auto* registration = CHECK_NOTNULL(get_queue_registration());
     auto  lg           = std::lock_guard{registration->mutex};
     auto  qr_pair      = registration->queues.find(queue);
@@ -361,6 +384,8 @@ set_write_interceptor(hsa_queue_t* queue, write_interceptor_t func, void* data)
 int
 add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!cb)
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -385,6 +410,8 @@ add_queue_cb(rocprofiler_attach_queue_cb_t cb, void* data)
 int
 remove_queue_cb(rocprofiler_attach_queue_cb_t cb)
 {
+    if(inherited_attach_child()) return ROCPROFILER_STATUS_ERROR_FINALIZED;
+
     if(!cb)
     {
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;

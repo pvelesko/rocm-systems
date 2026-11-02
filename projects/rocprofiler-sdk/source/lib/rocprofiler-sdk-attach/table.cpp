@@ -25,11 +25,41 @@
 #include "lib/common/abi.hpp"
 #include "lib/common/static_object.hpp"
 
+#include <pthread.h>
+
+#include <atomic>
+#include <mutex>
+
 namespace rocprofiler
 {
 namespace attach
 {
 ROCP_SDK_ENFORCE_ABI_VERSIONING(::RocAttachDispatchTable, ROCPROFILER_ATTACH_DISPATCH_TABLE_LENGTH);
+
+namespace
+{
+std::atomic<bool> child_process{false};
+static_assert(std::atomic<bool>::is_always_lock_free);
+}  // namespace
+
+void
+register_fork_handler()
+{
+    static auto once = std::once_flag{};
+    std::call_once(once, []() {
+        const int status = ::pthread_atfork(nullptr, nullptr, []() {
+            child_process.store(true, std::memory_order_release);
+            common::abandon_static_objects_after_fork();
+        });
+        ROCP_FATAL_IF(status != 0) << "failed to register attach fork handler: " << status;
+    });
+}
+
+bool
+fork_child_abandoned() noexcept
+{
+    return child_process.load(std::memory_order_acquire);
+}
 
 RocAttachDispatchTable*
 get_dispatch_table()

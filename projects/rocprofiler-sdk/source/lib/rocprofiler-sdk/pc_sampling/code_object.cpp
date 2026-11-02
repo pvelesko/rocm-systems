@@ -29,6 +29,7 @@
 #    include "lib/common/static_object.hpp"
 #    include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #    include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#    include "lib/rocprofiler-sdk/registration.hpp"
 
 #    include <rocprofiler-sdk/fwd.h>
 #    include <rocprofiler-sdk/pc_sampling.h>
@@ -98,6 +99,8 @@ flush_pc_sampling_buffers(const rocprofiler::code_object::hsa::code_object& code
 void
 executable_freeze_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return;
+
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
             if(code_object.hsa_executable == executable)
@@ -121,6 +124,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
     {
         return status;
     }
+    if(registration::fork_child_abandoned()) return status;
 
     executable_freeze_internal(executable);
     return HSA_STATUS_SUCCESS;
@@ -129,6 +133,8 @@ executable_freeze(hsa_executable_t executable, const char* options)
 void
 executable_destroy_internal(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned()) return;
+
     rocprofiler::code_object::iterate_loaded_code_objects(
         [&](const rocprofiler::code_object::hsa::code_object& code_object) {
             if(code_object.hsa_executable == executable)
@@ -146,6 +152,9 @@ executable_destroy_internal(hsa_executable_t executable)
 hsa_status_t
 executable_destroy(hsa_executable_t executable)
 {
+    if(registration::fork_child_abandoned())
+        return CHECK_NOTNULL(get_destroy_function())(executable);
+
     executable_destroy_internal(executable);
     // Call underlying function
     return CHECK_NOTNULL(get_destroy_function())(executable);
