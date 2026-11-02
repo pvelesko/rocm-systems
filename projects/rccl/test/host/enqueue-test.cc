@@ -3109,6 +3109,210 @@ TEST_F(EnqueueMicrotest, TasksRegAndEnqueue_UnresolvableRegVariantId_IsInvalidUs
   EXPECT_EQ(1, reg.calls);
 }
 
+namespace {
+struct WarpSpeedScheduleScene {
+  BatchPlanComm bp;
+  std::vector<ncclTaskColl> tasks;
+  std::vector<std::unique_ptr<unsigned char[]>> workStorage;
+  ncclKernelPlanBudget budget{};
+
+  WarpSpeedScheduleScene(std::vector<bool> const& useWarpSpeed, std::vector<int> const& algorithms,
+                         int maxWorkBatches)
+      : tasks(useWarpSpeed.size()), workStorage(useWarpSpeed.size()) {
+    EXPECT_EQ(useWarpSpeed.size(), algorithms.size());
+    ncclComm* comm = bp.c();
+    ncclKernelPlan* plan = bp.p();
+    comm->nRanks = 16;
+    comm->nNodes = 2;
+    comm->nChannels = 1;
+    comm->nvlsChannels = 1;
+    comm->WarpSize = 64;
+    comm->buffSizes[NCCL_PROTO_SIMPLE] = 1 << 22;
+    comm->planner.nTasksColl = static_cast<int>(tasks.size());
+    plan->persistent = true;
+    plan->workStorageType = ncclDevWorkStorageTypePersistent;
+    plan->kernelSpecialized = true;
+    budget.inArgsBytes = maxWorkBatches * sizeof(ncclDevWorkBatch);
+    budget.outArgsBytes = 1 << 30;
+
+    for (size_t i = 0; i < tasks.size(); ++i) {
+      ncclTaskColl& task = tasks[i];
+      task.func = ncclFuncAllReduce;
+      task.datatype = ncclFloat;
+      task.count = 1024 + i;
+      task.algorithm = algorithms[i];
+      task.protocol = NCCL_PROTO_SIMPLE;
+      task.nMaxChannels = 1;
+      task.minCTAs = 1;
+      task.maxCTAs = 1;
+      task.nvlsCTAs = NCCL_CONFIG_UNDEF_INT;
+      task.nWarps = 4;
+      task.chunkSteps = 1;
+      task.sliceSteps = 1;
+      task.trafficBytes = 8192;
+      task.devFuncId = 0;
+#ifdef ENABLE_WARP_SPEED
+      task.useWarpSpeed = useWarpSpeed[i];
+#endif
+      task.cgaClusterSize = NCCL_CONFIG_UNDEF_INT;
+      ncclIntruQueueEnqueue(&comm->planner.collTaskQueue, &task);
+
+      workStorage[i] = std::make_unique<unsigned char[]>(
+          sizeof(ncclWorkList) + sizeof(ncclDevWorkColl));
+      auto* workNode = reinterpret_cast<ncclWorkList*>(workStorage[i].get());
+      memset(workNode, 0, sizeof(ncclWorkList) + sizeof(ncclDevWorkColl));
+      workNode->workType = ncclDevWorkTypeColl;
+      workNode->size = sizeof(ncclDevWorkColl);
+      ncclIntruQueueEnqueue(&comm->planner.collWorkQueue, workNode);
+    }
+
+#ifdef ENABLE_WARP_SPEED
+    g_rcclWarpSpeedSupportedPrefix =
+        [](struct ncclComm*, struct ncclKernelPlan* candidatePlan,
+           struct ncclTaskColl* head, int nCollTasks) {
+          if (!ncclIntruQueueEmpty(&candidatePlan->p2pTaskQueue) ||
+              !ncclIntruQueueEmpty(&candidatePlan->bcastTaskQueue)) {
+            return false;
+          }
+          while (head != nullptr && nCollTasks != 0) {
+            if (head->algorithm != NCCL_ALGO_RING || !head->useWarpSpeed) return false;
+            head = head->next;
+            if (nCollTasks > 0) --nCollTasks;
+          }
+          return nCollTasks <= 0;
+        };
+#endif
+  }
+
+  int ScheduleAndFinish() {
+    EXPECT_EQ(ncclSuccess, scheduleCollTasksToPlan(bp.c(), bp.p(), &budget));
+    finishPlan(bp.c(), bp.p());
+    return PlanTaskCount();
+  }
+
+  int PlanTaskCount() {
+    int count = 0;
+    for (ncclTaskColl* task = ncclIntruQueueHead(&bp.p()->collTaskQueue);
+         task != nullptr; task = task->next) {
+      ++count;
+    }
+    return count;
+  }
+
+  int RemainingTaskCount() {
+    int count = 0;
+    for (ncclTaskColl* task = ncclIntruQueueHead(&bp.c()->planner.collTaskQueue);
+         task != nullptr; task = task->next) {
+      ++count;
+    }
+    return count;
+  }
+
+  void ExpectConservedInOrder(int accepted) {
+    ASSERT_LE(accepted, static_cast<int>(tasks.size()));
+    ncclTaskColl* task = ncclIntruQueueHead(&bp.p()->collTaskQueue);
+    for (int i = 0; i < accepted; ++i) {
+      ASSERT_EQ(&tasks[i], task);
+      task = task->next;
+    }
+    EXPECT_EQ(nullptr, task);
+
+    task = ncclIntruQueueHead(&bp.c()->planner.collTaskQueue);
+    for (size_t i = accepted; i < tasks.size(); ++i) {
+      ASSERT_EQ(&tasks[i], task);
+      task = task->next;
+    }
+    EXPECT_EQ(nullptr, task);
+    EXPECT_EQ(static_cast<int>(tasks.size()), PlanTaskCount() + RemainingTaskCount());
+  }
+
+#ifdef ENABLE_WARP_SPEED
+  void ExpectWarpSpeedMode(bool expected) {
+    EXPECT_EQ(expected, bp.p()->warpSpeedPlan);
+    EXPECT_EQ(expected, static_cast<bool>(bp.p()->kernelArgs->warpLevelComm));
+  }
+#endif
+};
+}  // namespace
+
+#ifdef ENABLE_WARP_SPEED
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_FourEligibleEmitThreeTaskWarpSpeedPlan) {
+  WarpSpeedScheduleScene scene({true, true, true, true},
+                               {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/4);
+  EXPECT_EQ(3, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(true);
+  scene.ExpectConservedInOrder(/*accepted=*/3);
+}
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_BudgetTruncatedMixedTailKeepsOrdinaryMode) {
+  WarpSpeedScheduleScene scene({true, true, true, true, false},
+                               {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING,
+                                NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/4);
+  EXPECT_EQ(4, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  scene.ExpectConservedInOrder(/*accepted=*/4);
+}
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_OppositeMixedOrderingStaysOrdinary) {
+  WarpSpeedScheduleScene scene({false, true, true, true, true},
+                               {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING,
+                                NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/5);
+  EXPECT_EQ(5, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  scene.ExpectConservedInOrder(/*accepted=*/5);
+}
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_TreeAndBelowThresholdTasksStayOrdinary) {
+  WarpSpeedScheduleScene scene({false, false, false, false},
+                               {NCCL_ALGO_TREE, NCCL_ALGO_RING, NCCL_ALGO_TREE, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/4);
+  EXPECT_EQ(4, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  scene.ExpectConservedInOrder(/*accepted=*/4);
+}
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_DeferredP2pForcesConsistentOrdinaryMode) {
+  WarpSpeedScheduleScene scene({true, true, true},
+                               {NCCL_ALGO_RING, NCCL_ALGO_RING, NCCL_ALGO_RING},
+                               /*maxWorkBatches=*/3);
+  scene.bp.c()->planner.nTasksP2p = 1;
+  EXPECT_EQ(3, scene.ScheduleAndFinish());
+  scene.ExpectWarpSpeedMode(false);
+  scene.ExpectConservedInOrder(/*accepted=*/3);
+}
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_LaunchGridUsesStoredPlanMode) {
+  ncclComm comm{};
+  ncclKernelPlan plan{};
+  comm.WarpSize = 64;
+  plan.threadPerBlock = 256;
+
+  // The accepted task prefix may be WarpSpeed-eligible after a mixed tail was
+  // budget-truncated, but launch geometry must keep the ordinary packing mode.
+  g_rcclWarpSpeedSupported = true;
+  plan.warpSpeedPlan = false;
+  EXPECT_EQ(8, ncclPlanLaunchChannels(&comm, &plan, /*nChannels=*/8));
+
+  plan.warpSpeedPlan = true;
+  EXPECT_EQ(2, ncclPlanLaunchChannels(&comm, &plan, /*nChannels=*/8));
+}
+#endif
+
+TEST_F(EnqueueMicrotest, WarpSpeedPlanner_MacroOffCoalescesOrdinary58Tasks) {
+#ifdef ENABLE_WARP_SPEED
+  GTEST_SKIP() << "Macro-off coverage runs in rccl-UnitTestsMicroEnqueue";
+#else
+  WarpSpeedScheduleScene scene(std::vector<bool>(58, false),
+                               std::vector<int>(58, NCCL_ALGO_RING),
+                               /*maxWorkBatches=*/58);
+  EXPECT_EQ(58, scene.ScheduleAndFinish());
+  scene.ExpectConservedInOrder(/*accepted=*/58);
+#endif
+}
+
 // ===========================================================================
 // finishPlan (enqueue.cc:294) -- packs the per-channel work batches into the
 // kernel-args block and merges the per-channel proxy-op lists into one ordered
@@ -5029,7 +5233,13 @@ TEST_F(EnqueueMicrotest, TopoGetAlgoInfo_ThreePivotBiRings_PicksTreeLlUpToTheCut
     ASSERT_EQ(ncclSuccess, topoGetAlgoInfo(cc.get(), &task, c.nBytes, tbl.ptr(), /*simInfo=*/nullptr));
     EXPECT_EQ(c.algo, task.algorithm) << c.nBytes;
     EXPECT_EQ(c.proto, task.protocol) << c.nBytes;
+#ifdef ENABLE_WARP_SPEED
+    // The shipping WarpSpeed arm writes the tuned base channel count back
+    // after this pivot override, even when the selected task is ordinary.
+    EXPECT_EQ(32, task.nMaxChannels) << c.nBytes;
+#else
     EXPECT_EQ(c.nMaxChannels, task.nMaxChannels) << c.nBytes;
+#endif
   }
 }
 
