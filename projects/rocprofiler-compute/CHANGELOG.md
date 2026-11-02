@@ -20,6 +20,11 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Scalar data cache utilization, latency, stall rate, and bandwidth.
   * GL1 request latency.
 
+* Added PC sampling counts per source line.
+  * `rocprof-compute analyze --output-format csv` writes `<file>_pc_sampling.csv` beside each captured source file. It lists every source line of the file with the samples of the instructions compiled from it, and where those instructions sit in the per-kernel ISA files.
+  * The analysis database stores the per-source-line counts in `compute_pc_sample_state`, next to the per-instruction counts.
+  * If some instructions of a source file have no source line number, the file's CSV starts with an `Unattributable instructions` row. It counts the samples lost because the compiler wrote no source line number for those instructions.
+
 ### Changed
 
 * `--triton-trace` no longer captures the Triton kernels that `torch.compile` generates. Use `--torch-trace` for those kernels.
@@ -48,6 +53,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 * `GPU_ID` in analyze output and the `--gpu-id` filter count every GPU on the node in topology order, not only the GPUs that ran kernels. A run on only the fourth GPU now reports and filters as `GPU_ID` 3 instead of 0.
 
 * Renamed the PC sampling analyze table columns `count_issued` and `count_stalled` to `issue_count` and `stall_count`, so the terminal table uses the same column names as `pc_sampling_summary.csv` and `compute_pc_sampling_summary_view`.
+
+* Analyze mode no longer needs the `tabulate` Python package. rocprofiler-compute now ships it.
 
 * `--list-metrics` now does what `--list-blocks` and `--list-available-metrics` did, for the current GPU. It no longer takes a GPU architecture.
   * On its own, it shows a table of blocks and their aliases.
