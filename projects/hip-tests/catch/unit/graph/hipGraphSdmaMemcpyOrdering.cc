@@ -34,8 +34,7 @@ __global__ void FillKernel(unsigned* p, size_t n, unsigned v) {
 // One fan-out step: kernels on the root stream feed a memcpy per side stream.
 void CaptureStep(hipStream_t root, const std::vector<hipStream_t>& side, hipEvent_t fork,
                  const std::vector<hipEvent_t>& join, const std::vector<unsigned*>& src,
-                 const std::vector<unsigned*>& dst, hipMemcpyKind kind, size_t bytes,
-                 std::vector<hipGraphNode_t>* copies = nullptr) {
+                 const std::vector<unsigned*>& dst, hipMemcpyKind kind, size_t bytes) {
   for (int i = 0; i < kBranches; ++i) {
     FillKernel<<<kGrid, kBlock, 0, root>>>(src[i], kElems, kProduced);
   }
@@ -43,14 +42,6 @@ void CaptureStep(hipStream_t root, const std::vector<hipStream_t>& side, hipEven
   for (int i = 0; i < kBranches; ++i) {
     HIP_CHECK(hipStreamWaitEvent(side[i], fork, 0));
     HIP_CHECK(hipMemcpyAsync(dst[i], src[i], bytes, kind, side[i]));
-    if (copies != nullptr) {
-      hipStreamCaptureStatus status;
-      const hipGraphNode_t* deps = nullptr;
-      size_t num_deps = 0;
-      HIP_CHECK(hipStreamGetCaptureInfo_v2(side[i], &status, nullptr, nullptr, &deps, &num_deps));
-      REQUIRE(num_deps == 1);
-      copies->push_back(deps[0]);
-    }
     HIP_CHECK(hipEventRecord(join[i], side[i]));
     HIP_CHECK(hipStreamWaitEvent(root, join[i], 0));
   }
@@ -151,6 +142,8 @@ HIP_TEST_CASE(Unit_hipGraphLaunch_SdmaMemcpyOrderedAfterProducer_Child) {
   HIP_CHECK(hipStreamDestroy(root));
 }
 
+// hipStreamGetCaptureInfo_v2 wraps cuStreamGetCaptureInfo_v2, which CUDA 13 removed.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION < 13000)
 /**
  * Test Description
  * ------------------------
@@ -199,11 +192,19 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProdu
   }
 
   hipGraph_t graph = nullptr;
-  std::vector<hipGraphNode_t> copies_b;
+  std::vector<hipGraphNode_t> copies_b(kBranches, nullptr);
   HIP_CHECK(hipStreamBeginCapture(root, hipStreamCaptureModeGlobal));
   CaptureStep(root, side, fork_a, join_a, src_a, dst_a, hipMemcpyDeviceToDeviceNoCU, bytes);
-  CaptureStep(root, side, fork_b, join_b, src_b, dst_b, hipMemcpyDeviceToHost, small_bytes,
-              &copies_b);
+  CaptureStep(root, side, fork_b, join_b, src_b, dst_b, hipMemcpyDeviceToHost, small_bytes);
+  // Each side stream's only capture dependency is now its second-step copy.
+  for (int i = 0; i < kBranches; ++i) {
+    hipStreamCaptureStatus status;
+    const hipGraphNode_t* deps = nullptr;
+    size_t num_deps = 0;
+    HIP_CHECK(hipStreamGetCaptureInfo_v2(side[i], &status, nullptr, nullptr, &deps, &num_deps));
+    REQUIRE(num_deps == 1);
+    copies_b[i] = deps[0];
+  }
   HIP_CHECK(hipStreamEndCapture(root, &graph));
 
   hipGraphExec_t graph_exec = nullptr;
@@ -243,6 +244,7 @@ HIP_TEST_CASE(Unit_hipGraphExecMemcpyNodeSetParams1D_SdmaMemcpyOrderedAfterProdu
   HIP_CHECK(hipEventDestroy(fork_b));
   HIP_CHECK(hipStreamDestroy(root));
 }
+#endif
 
 /**
 * End doxygen group GraphTest.
