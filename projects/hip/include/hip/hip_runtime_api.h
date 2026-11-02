@@ -9230,6 +9230,62 @@ hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node, hipGraphNode_t* pD
 hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType);
 
 /**
+ * @brief Returns a node's identifier within its containing graph.
+ *
+ * @param [in] node - Node to get the identifier of.
+ * @param [out] nodeId - Returns the node's identifier.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * The identifier is unique only among the nodes of the graph that contains @p node. The local
+ * identifier and the containing graph's identifier together uniquely identify the node. It
+ * remains stable for the lifetime of the node.
+ *
+ */
+hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId);
+
+/**
+ * @brief Returns a node's identifier as reported by profiling tools.
+ *
+ * @param [in] node - Node to get the identifier of.
+ * @param [out] toolsId - Returns the node's tools identifier.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * Profiling tools report this opaque identifier against the device work the node launches, so it
+ * joins a node to its events in a trace. Distinct live nodes have different identifiers, and a
+ * node's identifier remains stable for its lifetime. The numeric layout is implementation-defined.
+ *
+ */
+hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId);
+
+/**
+ * @brief Returns a graph's identifier.
+ *
+ * @param [in] graph - Graph to get the identifier of.
+ * @param [out] graphId - Returns the graph's identifier.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * The identifier matches the graph identifier reported by graph debugging and profiling tools.
+ * Distinct live graphs have different identifiers, and a graph's identifier remains stable for
+ * its lifetime.
+ *
+ */
+hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId);
+
+/**
+ * @brief Returns an executable graph's identifier.
+ *
+ * @param [in] graphExec - Executable graph to get the identifier of.
+ * @param [out] graphId - Returns the executable graph's identifier.
+ * @returns #hipSuccess, #hipErrorInvalidValue, #hipErrorNotSupported
+ *
+ * The identifier matches the executable graph identifier reported by profiling tools. Distinct
+ * live executable graphs have different identifiers, and an executable graph's identifier remains
+ * stable for its lifetime.
+ *
+ */
+hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId);
+
+/**
  * @brief Remove a node from the graph.
  *
  * @param [in] node - graph node to remove

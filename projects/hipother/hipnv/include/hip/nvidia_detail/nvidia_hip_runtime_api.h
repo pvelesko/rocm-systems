@@ -30,6 +30,7 @@
 #define CUDA_12030 12030
 #define CUDA_12080 12080
 #define CUDA_13000 13000
+#define CUDA_13010 13010
 
 #ifdef __cplusplus
 extern "C" {
@@ -1073,6 +1074,10 @@ inline static hipError_t hipCUDAErrorTohipError(cudaError_t cuError) {
       return hipErrorProfilerAlreadyStopped;
     case cudaErrorInsufficientDriver:
       return hipErrorInsufficientDriver;
+#if CUDA_VERSION >= CUDA_11010
+    case cudaErrorCallRequiresNewerDriver:
+      return hipErrorInsufficientDriver;
+#endif  // CUDA_VERSION >= CUDA_11010
     case cudaErrorUnsupportedLimit:
       return hipErrorUnsupportedLimit;
     case cudaErrorPeerAccessUnsupported:
@@ -5115,6 +5120,54 @@ inline static hipError_t hipGraphNodeGetDependentNodes(hipGraphNode_t node,
 
 inline static hipError_t hipGraphNodeGetType(hipGraphNode_t node, hipGraphNodeType* pType) {
   return hipCUDAErrorTohipError(cudaGraphNodeGetType(node, pType));
+}
+
+// The four identifier queries below validate their arguments before the version guard so that the
+// rejection of a null handle or output pointer is identical on both backends. CUDA grew these
+// entry points in 13.1; on an older toolkit they report the feature as absent.
+
+inline static hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
+  if (node == nullptr || nodeId == nullptr) {
+    return hipErrorInvalidValue;
+  }
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetLocalId(node, nodeId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
+  if (node == nullptr || toolsId == nullptr) {
+    return hipErrorInvalidValue;
+  }
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphNodeGetToolsId(node, toolsId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphGetId(hipGraph_t graph, unsigned int* graphId) {
+  if (graph == nullptr || graphId == nullptr) {
+    return hipErrorInvalidValue;
+  }
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphGetId(graph, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
+}
+
+inline static hipError_t hipGraphExecGetId(hipGraphExec_t graphExec, unsigned int* graphId) {
+  if (graphExec == nullptr || graphId == nullptr) {
+    return hipErrorInvalidValue;
+  }
+#if CUDA_VERSION >= CUDA_13010
+  return hipCUDAErrorTohipError(cudaGraphExecGetId(graphExec, graphId));
+#else
+  return hipErrorNotSupported;
+#endif  // CUDA_VERSION >= CUDA_13010
 }
 
 inline static hipError_t hipGraphDestroyNode(hipGraphNode_t node) {

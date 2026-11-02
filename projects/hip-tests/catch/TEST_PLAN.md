@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 631 | 631 | 0 |
-| **total** | **631** | **631** | **0** |
+| `contract` | 639 | 639 | 0 |
+| **total** | **639** | **639** | **0** |
 
 ## Tier: `contract`
 
@@ -474,6 +474,19 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_GraphHost_HipGraphAddHostNode_Default_InvokesCallbackOnLaunch` | hipGraphAddHostNode | a host node's callback runs exactly once when the instantiated graph is launched |
 | `Contract_GraphHost_HipGraphHostNodeGetParams_Default_RoundTripsFnAndUserData` | hipGraphHostNodeGetParams | retrieved host-node params round-trip the callback fn and userData pointers |
 | `Contract_GraphHost_HipGraphNodeGetType_NodeType_ReportsHost` | hipGraphNodeGetType | a node added via hipGraphAddHostNode reports type hipGraphNodeTypeHost |
+
+### `graph_id` (8 cases)
+
+| Case | API | Asserts |
+|---|---|---|
+| `Contract_GraphId_HipGraphExecGetId_LiveExecutables_AreStableAndDistinct` | hipGraphExecGetId | an executable graph's identifier is stable and differs from another live executable's identifier |
+| `Contract_GraphId_HipGraphExecGetId_NullArgs_AreRejected` | hipGraphExecGetId | a null executable graph or null output pointer is rejected as an invalid value |
+| `Contract_GraphId_HipGraphGetId_LiveGraphs_AreStableAndDistinct` | hipGraphGetId | a graph's identifier is stable and differs from another live graph's identifier |
+| `Contract_GraphId_HipGraphGetId_NullArgs_AreRejected` | hipGraphGetId | a null graph or null output pointer is rejected as an invalid value |
+| `Contract_GraphId_HipGraphNodeGetLocalId_LiveNodes_AreStableAndDistinct` | hipGraphNodeGetLocalId | a node's local identifier is stable and differs from another live node's identifier |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArgs_AreRejected` | hipGraphNodeGetLocalId | a null node or null output pointer is rejected as an invalid value |
+| `Contract_GraphId_HipGraphNodeGetToolsId_LiveNodes_AreStableAndDistinct` | hipGraphNodeGetToolsId | a node's opaque tools identifier is stable and differs from another live node's identifier |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArgs_AreRejected` | hipGraphNodeGetToolsId | a null node or null output pointer is rejected as an invalid value |
 
 ### `graph_instantiate_params` (2 cases)
 
