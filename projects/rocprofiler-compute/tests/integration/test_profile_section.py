@@ -123,7 +123,7 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
 
 
 def test_list_metrics(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics-gfx-id", "gfx90a"]
+    options = ["--list-metrics", "--list-metrics-gfx-id", "gfx90a"]
     workload_dir = common.get_output_dir()
     _ = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=True, roof=False
@@ -134,7 +134,7 @@ def test_list_metrics(binary_handler_profile_rocprof_compute):
 
 
 def test_list_metrics_with_block(binary_handler_profile_rocprof_compute):
-    options = ["--list-metrics-gfx-id", "gfx90a", "--block", "10"]
+    options = ["--list-metrics", "--list-metrics-gfx-id", "gfx90a", "--block", "10"]
     workload_dir = common.get_output_dir()
     code = binary_handler_profile_rocprof_compute(
         config, workload_dir, options, check_success=False, roof=False

@@ -147,17 +147,23 @@ def add_general_group(
         nargs="*",
         help=(
             "List the blocks of the current GPU.\n"
-            "Add block or metric [id]s or aliases to list their metrics, "
-            'or "all" to list every metric.\n'
+            "Add block or metric [id]s or aliases to list their metrics with units\n"
+            'and descriptions, or "all" to list every metric. Each id or alias adds\n'
+            "to the list: --list-metrics sol 12.1 lists all of block 2 (sol) and\n"
+            "table 12.1.\n"
             "With analyze -p <workload>, list the workload's blocks and metrics."
         ),
     )
-    # Debug option: list the metrics of another arch. Its first value is the arch.
     general_group.add_argument(
         "--list-metrics-gfx-id",
         dest="list_metrics_gfx_id",
-        nargs="+",
-        help=argparse.SUPPRESS,
+        metavar="<arch>",
+        choices=supported_archs.keys(),
+        help=(
+            "List metrics for GPU <arch> instead of the current GPU. "
+            "Use with --list-metrics.\n"
+            f"Values: {', '.join(supported_archs)}"
+        ),
     )
     general_group.add_argument(
         "--list-blocks",
