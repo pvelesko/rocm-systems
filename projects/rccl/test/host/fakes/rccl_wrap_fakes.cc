@@ -140,8 +140,17 @@ void rcclCeAllReduceGraphLatchTick(struct ncclComm*, bool ceCapturing) {
 // definitions are dropped by --gc-sections when the option is off.
 bool g_rcclWarpSpeedSupported = false;
 int g_rcclWarpSpeedSupportedCalls = 0;
+struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+int g_rcclWarpSpeedSupportedLastNCollTasks = 0;
 bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*) {
   ++g_rcclWarpSpeedSupportedCalls;
+  return g_rcclWarpSpeedSupported;
+}
+bool rcclWarpSpeedSupported(struct ncclComm*, struct ncclKernelPlan*,
+                            struct ncclTaskColl* collHead, int nCollTasks) {
+  ++g_rcclWarpSpeedSupportedCalls;
+  g_rcclWarpSpeedSupportedLastCollHead = collHead;
+  g_rcclWarpSpeedSupportedLastNCollTasks = nCollTasks;
   return g_rcclWarpSpeedSupported;
 }
 
@@ -367,6 +376,8 @@ void ResetRcclWrapFakes() {
   g_rcclCeAllReduceGraphLatchTickLastCapturing = false;
   g_rcclWarpSpeedSupported = false;
   g_rcclWarpSpeedSupportedCalls = 0;
+  g_rcclWarpSpeedSupportedLastCollHead = nullptr;
+  g_rcclWarpSpeedSupportedLastNCollTasks = 0;
   g_rcclWarpSpeedAdjustChannels = DefaultWarpSpeedAdjustChannels;
   g_rcclSetWarpSpeedAutoResult = ncclSuccess;
   g_rcclSetWarpSpeedAutoCalls = 0;

@@ -510,6 +510,13 @@ void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, i
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan);
 bool rcclWarpSpeedSupported(struct ncclComm* comm, struct ncclKernelPlan* plan,
                             struct ncclTaskColl* collHead, int nCollTasks);
+inline bool rcclShouldCapWarpSpeedPlan(struct ncclComm* comm, struct ncclKernelPlan* plan,
+                                      struct ncclTaskColl* collHead, int nPlanColls) {
+  // More than three collectives are unsafe only when the complete budgeted
+  // collective prefix is WarpSpeed-eligible. Mixed prefixes take the ordinary
+  // path and remain ineligible as more tasks are appended.
+  return nPlanColls > 3 && rcclWarpSpeedSupported(comm, plan, collHead, nPlanColls);
+}
 ncclResult_t rcclSetWarpSpeedAuto(struct ncclComm* comm, struct ncclTaskColl* info, size_t nBytes);
 int rcclGetMaxWarpsPerBlock(struct ncclComm* comm);
 bool rcclCanUseWarpSpeedAuto(struct ncclComm* comm, int nNodes);

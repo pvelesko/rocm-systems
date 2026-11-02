@@ -85,6 +85,8 @@ extern bool g_rcclCeAllReduceGraphLatchTickLastCapturing;  // UNDRIVEN
 // -------------------------------------------------------------------------
 extern bool g_rcclWarpSpeedSupported;
 extern int g_rcclWarpSpeedSupportedCalls;
+extern struct ncclTaskColl* g_rcclWarpSpeedSupportedLastCollHead;
+extern int g_rcclWarpSpeedSupportedLastNCollTasks;
 extern ncclResult_t g_rcclSetWarpSpeedAutoResult;
 extern int g_rcclSetWarpSpeedAutoCalls;
 extern int g_rcclSetWarpSpeedCUsCalls;

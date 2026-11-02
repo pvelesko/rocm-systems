@@ -2064,6 +2064,72 @@ TEST(Rcclwrap, WarpSpeedSupported_RejectsIneligibleTask)
     EXPECT_FALSE(rcclWarpSpeedSupported(&comm, &plan, &first, /*nCollTasks=*/2));
 }
 
+TEST(Rcclwrap, WarpSpeedPlanCap_BudgetedPrefixMatchesPlanEligibility)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    struct
+    {
+        int nTasks;
+        int ordinaryTask;
+        int treeTask;
+        bool expectCap;
+    } const cases[] = {
+        {4, -1, -1, true},
+        {4, 0, -1, false},
+        {4, 3, -1, false},
+        {4, -1, 1, false},
+        {5, -1, -1, true},
+        {5, 4, -1, false},
+    };
+
+    for(const auto& c : cases)
+    {
+        ncclTaskColl tasks[5]{};
+        for(int i = 0; i < c.nTasks; ++i)
+        {
+            tasks[i].algorithm = i == c.treeTask ? NCCL_ALGO_TREE : NCCL_ALGO_RING;
+            tasks[i].useWarpSpeed = i != c.ordinaryTask;
+            tasks[i].next = i + 1 < c.nTasks ? &tasks[i + 1] : nullptr;
+        }
+
+        EXPECT_EQ(c.expectCap, rcclWarpSpeedSupported(&comm, &plan, &tasks[0], c.nTasks));
+        EXPECT_EQ(c.expectCap, rcclShouldCapWarpSpeedPlan(&comm, &plan, &tasks[0], c.nTasks));
+        EXPECT_FALSE(rcclShouldCapWarpSpeedPlan(&comm, &plan, &tasks[0], /*nPlanColls=*/3));
+    }
+}
+
+TEST(Rcclwrap, WarpSpeedPlanCap_Ordinary58LayerGraphDoesNotSplitAtThree)
+{
+    ncclComm comm{};
+    auto topo = std::make_unique<ncclTopoSystem>();
+    ncclKernelPlan plan{};
+    comm.topo = topo.get();
+    topo->warpSpeedEnabled = true;
+    ncclIntruQueueConstruct(&plan.p2pTaskQueue);
+    ncclIntruQueueConstruct(&plan.bcastTaskQueue);
+
+    ncclTaskColl tasks[58]{};
+    for(int i = 0; i < 58; ++i)
+    {
+        tasks[i].algorithm = NCCL_ALGO_RING;
+        tasks[i].useWarpSpeed = false;
+        tasks[i].next = i + 1 < 58 ? &tasks[i + 1] : nullptr;
+    }
+
+    for(int nPlanColls = 0; nPlanColls <= 58; ++nPlanColls)
+    {
+        EXPECT_FALSE(rcclShouldCapWarpSpeedPlan(&comm, &plan, &tasks[0], nPlanColls))
+            << "nPlanColls=" << nPlanColls;
+    }
+}
+
 TEST(Rcclwrap, WarpSpeedSupported_OnlyChecksBudgetedPrefix)
 {
     ncclComm comm{};

@@ -897,12 +897,6 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
       // per-kind channel budget.
       bool taskAggIsolate = task->aggIsolate;
       if (taskAggIsolate && nPlanColls > 0) goto plan_full; // leave it to start a fresh plan
-      // gfx950 + ENABLE_WARP_SPEED: fusing 4 equal 1M-element AllReduces into one
-      // kernel drops rank nRanks-1's contribution on a subset of elements
-      // (GroupCall.Multistream, 8 GPU, delta 1/nRanks). Identical (3 colls) and
-      // 2-coll Multistream pass. Cap at 3 colls per plan.
-      if (nPlanColls >= 3) goto plan_full;
-
       nPlanColls += 1;
       workBytes += workNode->size;
       int kind = 2 * task->isCollnet + task->isNvls;
@@ -925,6 +919,30 @@ static ncclResult_t scheduleCollTasksToPlan(struct ncclComm* comm, struct ncclKe
     }
   plan_full:;
   } while (0);
+
+#ifdef ENABLE_WARP_SPEED
+  // gfx950 + ENABLE_WARP_SPEED: fusing 4 equal 1M-element AllReduces into one
+  // kernel drops rank nRanks-1's contribution on a subset of elements
+  // (GroupCall.Multistream, 8 GPU, delta 1/nRanks). Identical (3 colls) and
+  // 2-coll Multistream pass. Cap only when the complete budgeted collective
+  // prefix is WarpSpeed-eligible.
+  if (rcclShouldCapWarpSpeedPlan(
+        comm, plan, ncclIntruQueueHead(&planner->collTaskQueue), nPlanColls)) {
+    nPlanColls = 3;
+    for (int kind = 0; kind < 2 * 2; kind++) {
+      trafficBytes[kind] = 0;
+      nChannels[kind] = 0;
+    }
+    struct ncclTaskColl* task = ncclIntruQueueHead(&planner->collTaskQueue);
+    for (int i = 0; i < nPlanColls; i++) {
+      int kind = 2 * task->isCollnet + task->isNvls;
+      trafficBytes[kind] += std::max(MinTrafficPerChannel, task->trafficBytes);
+      nChannels[kind] += task->nMaxChannels;
+      nChannels[kind] = std::min(nChannels[kind], nMaxChannels[kind]);
+      task = task->next;
+    }
+  }
+#endif
 
   int kindPrev = -1;
   size_t trafficPerChannel = 0;
