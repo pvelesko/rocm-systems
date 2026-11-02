@@ -80,10 +80,16 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   bool use_retired_ = true;      //!< The last use is known to be complete
   bool armed_ = false;           //!< The value holds kInitSignalValueOne, visible to the GPU
   bool in_device_memory_ = false;  //!< Host stores to the value need FlushSignalStores
+  //! A host check on any thread saw the current use complete, unlike use_retired_, which only
+  //! the owning tracker updates. Holders keep the signal from being reused, so the value stays 0
+  //! until the next use, which must clear this.
+  std::atomic<bool> use_complete_{false};
 
   typedef union {
     struct {
-      uint32_t done_ : 1;       //!< True if signal is done
+      //! The current use's timing was read out or it has none to read. Says nothing about
+      //! whether the GPU finished the use; use_complete_ tracks that.
+      uint32_t timing_processed_ : 1;
       uint32_t interrupt_ : 1;  //!< True if the signal will trigger an interrupt
       uint32_t reserved_ : 30;
     };
@@ -103,7 +109,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   ProfilingSignal() : ts_(nullptr), engine_(HwQueueEngine::Compute) {
     signal_.handle = 0;
     flags_.data_ = 0;
-    flags_.done_ = true;
+    flags_.timing_processed_ = true;
     dispatch_slot_ = kNoDispatchSlot;
   }
 

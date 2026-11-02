@@ -3409,7 +3409,15 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
   if (hw_event == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_SIG, "No HW event");
     return false;
-  } else if (wait) {
+  }
+  auto* signal = reinterpret_cast<ProfilingSignal*>(hw_event);
+  // A signal in device memory loads across the bus, and callers such as WaitActiveStreams check
+  // the same finished command on every launch
+  if (signal->use_complete_.load(std::memory_order_acquire)) {
+    return true;
+  }
+  bool complete = false;
+  if (wait) {
     // hipEventBlockingSync
     // when set the CPU gives up host thread for other work
     // when not set the CPU enters a busy-wait on the event to occur
@@ -3417,14 +3425,15 @@ bool Device::IsHwEventReady(const amd::Event& event, bool wait, amd::SyncPolicy 
     bool active_wait =
         !((policy == amd::SyncPolicy::Blocking) & kHipEventBlockingSync) && ActiveWait();
     bool yield = (policy == amd::SyncPolicy::Yield);
-    const auto* signal = reinterpret_cast<const ProfilingSignal*>(hw_event);
-    return WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+    complete = WaitForSignal(signal->signal_, active_wait, yield, signal->in_device_memory_);
+  } else {
+    ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal->signal_.handle);
+    complete = (Hsa::signal_load_relaxed(signal->signal_) == 0);
   }
-
-  auto signal = reinterpret_cast<ProfilingSignal*>(hw_event)->signal_;
-  ClPrint(amd::LOG_INFO, amd::LOG_SIG, "Check HW event = 0x%lx", signal.handle);
-
-  return (Hsa::signal_load_relaxed(signal) == 0);
+  if (complete) {
+    signal->use_complete_.store(true, std::memory_order_release);
+  }
+  return complete;
 }
 
 // ================================================================================================
@@ -4294,7 +4303,8 @@ void Device::ResetHwEvents(const std::vector<void*>& hw_events) const {
       } else {
         Hsa::signal_silent_store_relaxed(ps->signal_, 1);
       }
-      ps->flags_.done_ = true;
+      ps->flags_.timing_processed_ = true;
+      ps->use_complete_.store(false, std::memory_order_relaxed);
       ps->ResetCachedTiming();
     }
   }
@@ -4377,7 +4387,7 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
       // Prepare this signal for profiling. The dispatch path assigns this
       // launch's slot only when the actual carrier is a kernel dispatch.
-      ps->flags_.done_ = false;
+      ps->flags_.timing_processed_ = false;
       ps->dispatch_slot_ = ProfilingSignal::kNoDispatchSlot;
     } else {
       // dep_slot >= 0: patch a barrier's dependency signal slot (cross-segment wait).
