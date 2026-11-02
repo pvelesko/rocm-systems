@@ -8,22 +8,16 @@
 #include <hip_test_common.hh>
 #include <contract_cleanup.hh>
 
-namespace {
-void CreateGraphWithEmptyNode(hipGraph_t* graph, hipGraphNode_t* node) {
-  HIP_CHECK(hipGraphCreate(graph, 0));
-  HIP_CHECK(hipGraphAddEmptyNode(node, *graph, nullptr, 0));
-}
-}  // namespace
-
-// @asserts: hipGraphNodeGetLocalId - a null node or null output pointer is rejected as an invalid value
-HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_NullArgs_AreRejected) {
+// @asserts: hipGraphNodeGetLocalId - returns hipErrorInvalidValue when either argument is null
+HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   unsigned int node_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &node);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   REQUIRE(hipGraphNodeGetLocalId(nullptr, &node_id) == hipErrorInvalidValue);
   (void)hipGetLastError();
@@ -31,15 +25,16 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_NullArgs_AreRejected) {
   (void)hipGetLastError();
 }
 
-// @asserts: hipGraphNodeGetToolsId - a null node or null output pointer is rejected as an invalid value
-HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_NullArgs_AreRejected) {
+// @asserts: hipGraphNodeGetToolsId - returns hipErrorInvalidValue when either argument is null
+HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   unsigned long long tools_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &node);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
 
   REQUIRE(hipGraphNodeGetToolsId(nullptr, &tools_id) == hipErrorInvalidValue);
   (void)hipGetLastError();
@@ -47,8 +42,8 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_NullArgs_AreRejected) {
   (void)hipGetLastError();
 }
 
-// @asserts: hipGraphGetId - a null graph or null output pointer is rejected as an invalid value
-HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_NullArgs_AreRejected) {
+// @asserts: hipGraphGetId - returns hipErrorInvalidValue when either argument is null
+HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   unsigned int graph_id = 0;
@@ -62,16 +57,17 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_NullArgs_AreRejected) {
   (void)hipGetLastError();
 }
 
-// @asserts: hipGraphExecGetId - a null executable graph or null output pointer is rejected as an invalid value
-HIP_TEST_CASE(Contract_GraphId_HipGraphExecGetId_NullArgs_AreRejected) {
+// @asserts: hipGraphExecGetId - returns hipErrorInvalidValue when either argument is null
+HIP_TEST_CASE(Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
   hipGraphExec_t graph_exec = nullptr;
   unsigned int graph_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &node);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
   HIP_CHECK(hipGraphInstantiateWithFlags(&graph_exec, graph, 0));
   cleanup.Add([graph_exec] { (void)hipGraphExecDestroy(graph_exec); });
 
@@ -81,8 +77,12 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphExecGetId_NullArgs_AreRejected) {
   (void)hipGetLastError();
 }
 
-// @asserts: hipGraphNodeGetLocalId - a node's local identifier is stable and differs from another live node's identifier
-HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_LiveNodes_AreStableAndDistinct) {
+// BACKEND-DIFF: CUDA before 13.1 does not provide graph ID query APIs.
+#if HT_AMD || (defined(CUDA_VERSION) && CUDA_VERSION >= 13010)
+
+// @asserts: hipGraphNodeGetLocalId - repeated calls return the same ID and different nodes have different IDs
+HIP_TEST_CASE(
+    Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t first = nullptr;
@@ -91,16 +91,12 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_LiveNodes_AreStableAndDist
   unsigned int first_id_repeat = 0;
   unsigned int second_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &first);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&first, graph, nullptr, 0));
   HIP_CHECK(hipGraphAddEmptyNode(&second, graph, nullptr, 0));
 
-  const hipError_t status = hipGraphNodeGetLocalId(first, &first_id);
-  if (status == hipErrorNotSupported) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("Backend does not assign graph node identifiers.");
-  }
-  HIP_CHECK(status);
+  HIP_CHECK(hipGraphNodeGetLocalId(first, &first_id));
   HIP_CHECK(hipGraphNodeGetLocalId(first, &first_id_repeat));
   HIP_CHECK(hipGraphNodeGetLocalId(second, &second_id));
 
@@ -108,8 +104,9 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetLocalId_LiveNodes_AreStableAndDist
   REQUIRE(first_id != second_id);
 }
 
-// @asserts: hipGraphNodeGetToolsId - a node's opaque tools identifier is stable and differs from another live node's identifier
-HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_LiveNodes_AreStableAndDistinct) {
+// @asserts: hipGraphNodeGetToolsId - repeated calls return the same ID and different nodes have different IDs
+HIP_TEST_CASE(
+    Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t first = nullptr;
@@ -118,16 +115,12 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_LiveNodes_AreStableAndDist
   unsigned long long first_id_repeat = 0;
   unsigned long long second_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &first);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&first, graph, nullptr, 0));
   HIP_CHECK(hipGraphAddEmptyNode(&second, graph, nullptr, 0));
 
-  const hipError_t status = hipGraphNodeGetToolsId(first, &first_id);
-  if (status == hipErrorNotSupported) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("Backend does not assign graph node identifiers.");
-  }
-  HIP_CHECK(status);
+  HIP_CHECK(hipGraphNodeGetToolsId(first, &first_id));
   HIP_CHECK(hipGraphNodeGetToolsId(first, &first_id_repeat));
   HIP_CHECK(hipGraphNodeGetToolsId(second, &second_id));
 
@@ -135,8 +128,8 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphNodeGetToolsId_LiveNodes_AreStableAndDist
   REQUIRE(first_id != second_id);
 }
 
-// @asserts: hipGraphGetId - a graph's identifier is stable and differs from another live graph's identifier
-HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_LiveGraphs_AreStableAndDistinct) {
+// @asserts: hipGraphGetId - repeated calls return the same ID and different graphs have different IDs
+HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t first = nullptr;
   hipGraph_t second = nullptr;
@@ -149,12 +142,7 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_LiveGraphs_AreStableAndDistinct) {
   HIP_CHECK(hipGraphCreate(&second, 0));
   cleanup.Add([second] { (void)hipGraphDestroy(second); });
 
-  const hipError_t status = hipGraphGetId(first, &first_id);
-  if (status == hipErrorNotSupported) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("Backend does not assign graph identifiers.");
-  }
-  HIP_CHECK(status);
+  HIP_CHECK(hipGraphGetId(first, &first_id));
   HIP_CHECK(hipGraphGetId(first, &first_id_repeat));
   HIP_CHECK(hipGraphGetId(second, &second_id));
 
@@ -162,8 +150,9 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphGetId_LiveGraphs_AreStableAndDistinct) {
   REQUIRE(first_id != second_id);
 }
 
-// @asserts: hipGraphExecGetId - an executable graph's identifier is stable and differs from another live executable's identifier
-HIP_TEST_CASE(Contract_GraphId_HipGraphExecGetId_LiveExecutables_AreStableAndDistinct) {
+// @asserts: hipGraphExecGetId - repeated calls return the same ID and different executable graphs have different IDs
+HIP_TEST_CASE(
+    Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId) {
   hip::contract::ContractCleanup cleanup;
   hipGraph_t graph = nullptr;
   hipGraphNode_t node = nullptr;
@@ -173,22 +162,21 @@ HIP_TEST_CASE(Contract_GraphId_HipGraphExecGetId_LiveExecutables_AreStableAndDis
   unsigned int first_id_repeat = 0;
   unsigned int second_id = 0;
 
-  CreateGraphWithEmptyNode(&graph, &node);
+  HIP_CHECK(hipGraphCreate(&graph, 0));
   cleanup.Add([graph] { (void)hipGraphDestroy(graph); });
+  HIP_CHECK(hipGraphAddEmptyNode(&node, graph, nullptr, 0));
+
   HIP_CHECK(hipGraphInstantiateWithFlags(&first, graph, 0));
   cleanup.Add([first] { (void)hipGraphExecDestroy(first); });
   HIP_CHECK(hipGraphInstantiateWithFlags(&second, graph, 0));
   cleanup.Add([second] { (void)hipGraphExecDestroy(second); });
 
-  const hipError_t status = hipGraphExecGetId(first, &first_id);
-  if (status == hipErrorNotSupported) {
-    (void)hipGetLastError();
-    HIP_SKIP_TEST("Backend does not assign executable graph identifiers.");
-  }
-  HIP_CHECK(status);
+  HIP_CHECK(hipGraphExecGetId(first, &first_id));
   HIP_CHECK(hipGraphExecGetId(first, &first_id_repeat));
   HIP_CHECK(hipGraphExecGetId(second, &second_id));
 
   REQUIRE(first_id == first_id_repeat);
   REQUIRE(first_id != second_id);
 }
+
+#endif  // HT_AMD || CUDA_VERSION >= 13010

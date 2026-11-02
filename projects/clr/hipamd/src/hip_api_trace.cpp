@@ -1136,6 +1136,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecEventRecordNodeSetEvent_fn =
       hip::hipGraphExecEventRecordNodeSetEvent;
   ptrDispatchTable->hipGraphExecEventWaitNodeSetEvent_fn = hip::hipGraphExecEventWaitNodeSetEvent;
+  ptrDispatchTable->hipGraphExecGetId_fn = hip::hipGraphExecGetId;
   ptrDispatchTable->hipGraphExecHostNodeSetParams_fn = hip::hipGraphExecHostNodeSetParams;
   ptrDispatchTable->hipGraphExecKernelNodeSetParams_fn = hip::hipGraphExecKernelNodeSetParams;
   ptrDispatchTable->hipGraphExecMemcpyNodeSetParams_fn = hip::hipGraphExecMemcpyNodeSetParams;
@@ -1147,6 +1148,7 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphExecMemsetNodeSetParams_fn = hip::hipGraphExecMemsetNodeSetParams;
   ptrDispatchTable->hipGraphExecUpdate_fn = hip::hipGraphExecUpdate;
   ptrDispatchTable->hipGraphGetEdges_fn = hip::hipGraphGetEdges;
+  ptrDispatchTable->hipGraphGetId_fn = hip::hipGraphGetId;
   ptrDispatchTable->hipGraphGetNodes_fn = hip::hipGraphGetNodes;
   ptrDispatchTable->hipGraphGetRootNodes_fn = hip::hipGraphGetRootNodes;
   ptrDispatchTable->hipGraphHostNodeGetParams_fn = hip::hipGraphHostNodeGetParams;
@@ -1175,6 +1177,8 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipGraphNodeGetDependencies_fn = hip::hipGraphNodeGetDependencies;
   ptrDispatchTable->hipGraphNodeGetDependentNodes_fn = hip::hipGraphNodeGetDependentNodes;
   ptrDispatchTable->hipGraphNodeGetEnabled_fn = hip::hipGraphNodeGetEnabled;
+  ptrDispatchTable->hipGraphNodeGetLocalId_fn = hip::hipGraphNodeGetLocalId;
+  ptrDispatchTable->hipGraphNodeGetToolsId_fn = hip::hipGraphNodeGetToolsId;
   ptrDispatchTable->hipGraphNodeGetType_fn = hip::hipGraphNodeGetType;
   ptrDispatchTable->hipGraphNodeSetEnabled_fn = hip::hipGraphNodeSetEnabled;
   ptrDispatchTable->hipGraphReleaseUserObject_fn = hip::hipGraphReleaseUserObject;
@@ -1551,10 +1555,6 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
   ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
   ptrDispatchTable->hipDeviceFlushGPUDirectRDMAWrites_fn = hip::hipDeviceFlushGPUDirectRDMAWrites;
-  ptrDispatchTable->hipGraphNodeGetLocalId_fn = hip::hipGraphNodeGetLocalId;
-  ptrDispatchTable->hipGraphNodeGetToolsId_fn = hip::hipGraphNodeGetToolsId;
-  ptrDispatchTable->hipGraphGetId_fn = hip::hipGraphGetId;
-  ptrDispatchTable->hipGraphExecGetId_fn = hip::hipGraphExecGetId;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0

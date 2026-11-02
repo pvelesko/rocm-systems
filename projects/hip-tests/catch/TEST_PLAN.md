@@ -479,14 +479,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Case | API | Asserts |
 |---|---|---|
-| `Contract_GraphId_HipGraphExecGetId_LiveExecutables_AreStableAndDistinct` | hipGraphExecGetId | an executable graph's identifier is stable and differs from another live executable's identifier |
-| `Contract_GraphId_HipGraphExecGetId_NullArgs_AreRejected` | hipGraphExecGetId | a null executable graph or null output pointer is rejected as an invalid value |
-| `Contract_GraphId_HipGraphGetId_LiveGraphs_AreStableAndDistinct` | hipGraphGetId | a graph's identifier is stable and differs from another live graph's identifier |
-| `Contract_GraphId_HipGraphGetId_NullArgs_AreRejected` | hipGraphGetId | a null graph or null output pointer is rejected as an invalid value |
-| `Contract_GraphId_HipGraphNodeGetLocalId_LiveNodes_AreStableAndDistinct` | hipGraphNodeGetLocalId | a node's local identifier is stable and differs from another live node's identifier |
-| `Contract_GraphId_HipGraphNodeGetLocalId_NullArgs_AreRejected` | hipGraphNodeGetLocalId | a null node or null output pointer is rejected as an invalid value |
-| `Contract_GraphId_HipGraphNodeGetToolsId_LiveNodes_AreStableAndDistinct` | hipGraphNodeGetToolsId | a node's opaque tools identifier is stable and differs from another live node's identifier |
-| `Contract_GraphId_HipGraphNodeGetToolsId_NullArgs_AreRejected` | hipGraphNodeGetToolsId | a null node or null output pointer is rejected as an invalid value |
+| `Contract_GraphId_HipGraphExecGetId_NullArguments_ReturnInvalidValue` | hipGraphExecGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphExecGetId_SameExecSameId_OtherExecOtherId` | hipGraphExecGetId | repeated calls return the same ID and different executable graphs have different IDs |
+| `Contract_GraphId_HipGraphGetId_NullArguments_ReturnInvalidValue` | hipGraphGetId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphGetId_SameGraphSameId_OtherGraphOtherId` | hipGraphGetId | repeated calls return the same ID and different graphs have different IDs |
+| `Contract_GraphId_HipGraphNodeGetLocalId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetLocalId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetLocalId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetLocalId | repeated calls return the same ID and different nodes have different IDs |
+| `Contract_GraphId_HipGraphNodeGetToolsId_NullArguments_ReturnInvalidValue` | hipGraphNodeGetToolsId | returns hipErrorInvalidValue when either argument is null |
+| `Contract_GraphId_HipGraphNodeGetToolsId_SameNodeSameId_OtherNodeOtherId` | hipGraphNodeGetToolsId | repeated calls return the same ID and different nodes have different IDs |
 
 ### `graph_instantiate_params` (2 cases)
 

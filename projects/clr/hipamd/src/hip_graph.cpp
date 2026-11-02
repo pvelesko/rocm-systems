@@ -2496,8 +2496,7 @@ hipError_t hipGraphNodeGetLocalId(hipGraphNode_t node, unsigned int* nodeId) {
 hipError_t hipGraphNodeGetToolsId(hipGraphNode_t node, unsigned long long* toolsId) {
   HIP_INIT_API(hipGraphNodeGetToolsId, node, toolsId);
   auto* graphNode = reinterpret_cast<hip::GraphNode*>(node);
-  if (toolsId == nullptr || !hip::GraphNode::isNodeValid(graphNode) ||
-      graphNode->GetParentGraph() == nullptr) {
+  if (toolsId == nullptr || !hip::GraphNode::isNodeValid(graphNode)) {
     HIP_RETURN(hipErrorInvalidValue);
   }
   constexpr unsigned int kGraphIdShift = 32;
